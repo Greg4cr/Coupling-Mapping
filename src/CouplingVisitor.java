@@ -88,7 +88,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	*/
 	@Override
 	public Void visitMethodDeclaration(JavaParser.MethodDeclarationContext ctx){
-		currentMethod = ctx.getChild(1).getText() + ";" + ctx.getChild(2).getText();
+		currentMethod = ctx.getChild(1).getText();
 		return super.visitChildren(ctx);
 	}
 
@@ -97,7 +97,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	*/
 	@Override 
 	public Void visitConstructorDeclaration(JavaParser.ConstructorDeclarationContext ctx){
-		currentMethod = "constructor" + ";" + ctx.getChild(2).getText();
+		currentMethod = "constructor";
 		return super.visitChildren(ctx);
 
 	}
