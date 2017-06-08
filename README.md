@@ -2,8 +2,10 @@
 ------------------------
 
 This project is inteded to map the dependencies between classes in a Java project, as measured using couplings between classes. In this context, a coupling is considered to be:
+
  * A call to a method in another class. This includes "new" declarations, as those call a constructor of a class.
  * The use of a data member of another class.
+
 This is a context-insensitive analysis. We do not track the context that a method is called under, and overloaded methods are mostly considered to be a single method (we do not need contextual information for this project).
 
 Use

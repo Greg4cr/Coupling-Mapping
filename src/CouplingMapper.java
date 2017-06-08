@@ -24,9 +24,11 @@ import java.util.Set;
 public class CouplingMapper{
 
 	private HashMap<String, HashMap<String, ArrayList<String>>> couplings;
+	private HashMap<String, String> returnTypes;
 
 	public CouplingMapper(){
 		couplings = new HashMap<String, HashMap<String, ArrayList<String>>>();
+		returnTypes = new HashMap<String, String>();
 	}
 
 	public static void main(String[] args) throws IllegalArgumentException{
@@ -54,6 +56,7 @@ public class CouplingMapper{
 						}
 					}
 				}
+
 			}catch(IOException e){
 				e.printStackTrace();
 			}
@@ -108,14 +111,24 @@ public class CouplingMapper{
 				CouplingVisitor visitor = new CouplingVisitor(); 
 				visitor.visit(tree);
 				HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
+				HashMap<String, String> rTypes = visitor.getReturnTypes();
 				couplings.put(file, coups);
+
+				for(String key : rTypes.keySet()){
+					System.out.println(key + ":" + rTypes.get(key));
+					returnTypes.put(key, rTypes.get(key));
+				}
 			}catch(IOException e){
 				e.printStackTrace();
 			}
 		}
 	}
 
-	// Filter couplings to remove non-project classes.
+	/* Filter couplings to simplify nested couplings
+	 * For example, X.y.z is filtered for the return type of X.y, 
+	 * to become A.z.
+	 * In this process, non-project classes are also removed.
+	 */
 	public void filterCouplings(){
 		Set<String> pathList = couplings.keySet();
 		ArrayList<String> classList = new ArrayList<String>();
@@ -135,12 +148,40 @@ public class CouplingMapper{
 				for(int index = 0; index < mCoups.size(); index++){
 					// Go over each coupling. These are indexed by class/method.
 					String coupling = mCoups.get(index);
-					// Get class name (substring before first '.')
+					String coupled = "";
+
+					// If there are 2+ "." characters, we want to simplify
 					if(coupling.contains(".")){
-						coupling = coupling.substring(0, coupling.indexOf("."));
+						String[] parts = coupling.split("\\.");
+						while(parts.length > 2){
+							System.out.println(coupling);
+							// Get initial object
+							coupled = parts[0];
+							// Is this part of the project?
+							if(classList.contains(coupled)){
+								// Get method return type
+								System.out.println("---"+coupled+"."+parts[1]);
+								String rType = returnTypes.get(coupled + "." + parts[1]);
+								// Replace coupling with return type
+								coupling = rType;
+								for(int word = 2; word < parts.length; word++){
+									coupling = coupling + "." + parts[word];
+								}
+							}else{
+								// If not, go ahead and break out.
+								break;
+							}
+							parts = coupling.split("\\.");
+						}
+						coupled = coupling.substring(0, coupling.indexOf("."));
+						System.out.println(coupling);
+						System.out.println("-----------------------------");
+					}else{
+						coupled = coupling;
 					}
-					if(classList.contains(coupling)){
-						filteredCoups.add(mCoups.get(index));
+
+					if(classList.contains(coupled)){
+						filteredCoups.add(coupling);
 					}
 				}
 				coups.put(method, filteredCoups);
@@ -152,5 +193,9 @@ public class CouplingMapper{
 	// Getters and setters
 	public HashMap<String, HashMap<String, ArrayList<String>>> getCouplings(){
 		return couplings;
+	}
+
+	public HashMap<String, String> getReturnTypes(){
+		return returnTypes;
 	}
 }

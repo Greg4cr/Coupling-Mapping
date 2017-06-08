@@ -22,6 +22,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	private String currentMethod;
 	private HashMap<String, ArrayList<String>> couplings;
 	private HashMap<String, HashMap<String, String>> variables;
+	private HashMap<String, String> returnTypes;
 
 	public static void main(String[] args){
 		try{
@@ -52,6 +53,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		currentMethod = "";
 		couplings = new HashMap<String, ArrayList<String>>();
 		variables = new HashMap<String, HashMap<String, String>>();
+		returnTypes = new HashMap<String, String>();
 	}
 
 	/* Gets the class name and whether it inherits from any parents
@@ -89,6 +91,36 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	@Override
 	public Void visitMethodDeclaration(JavaParser.MethodDeclarationContext ctx){
 		currentMethod = ctx.getChild(1).getText();
+		String type = ctx.getChild(0).getText();
+		if(type.contains("<")){
+			type = type.substring(0, type.indexOf("<"));
+		}
+		if(type.contains("[")){
+			type = type.substring(0, type.indexOf("["));
+		}
+
+		if(returnTypes.containsKey(currentMethod)){
+			String existing = returnTypes.get(currentMethod);
+			boolean exists = false;
+			if(existing.contains(",")){
+				String[] types = existing.split(",");
+				for(String eType : types){
+					if(eType.equals(type)){
+						exists = true;
+					}
+				}	
+			}else{
+				if(existing.equals(type)){
+					exists = true;
+				}
+			}
+			if(!exists){
+				type = type + "," + returnTypes.get(currentMethod);
+				returnTypes.put(currentClass + "." + currentMethod, type);
+			}
+		}else{
+			returnTypes.put(currentClass + "." + currentMethod, type);	
+		}
 		return super.visitChildren(ctx);
 	}
 
@@ -423,5 +455,9 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 
 	public HashMap<String, HashMap<String, String>> getVariables(){
 		return variables;
+	}
+
+	public HashMap<String, String> getReturnTypes(){
+		return returnTypes;
 	}
 }
