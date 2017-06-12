@@ -119,15 +119,15 @@ public class CouplingMapper{
 				visitor.visit(tree);
 				HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
 				HashMap<String, String> rTypes = visitor.getReturnTypes();
-				HashMap<String, String> parents = visitor.getParents();
+				HashMap<String, String> parentList = visitor.getParents();
 				HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
 				couplings.put(file, coups);
 
 				for(String key : rTypes.keySet()){
 					returnTypes.put(key, rTypes.get(key));
 				}
-				for(String key: parents.keySet()){
-					parents.put(key, parents.get(key));	
+				for(String key: parentList.keySet()){
+					parents.put(key, parentList.get(key));	
 				}
 
 				for(String key: allVars.keySet()){
@@ -178,7 +178,6 @@ public class CouplingMapper{
 							// Is this part of the project?
 							if(classList.contains(coupled)){
 								// Get method return type
-								System.out.println("---"+coupled+"."+parts[1]);
 								if(returnTypes.containsKey(coupled + "." + parts[1])){
 									String rType = returnTypes.get(coupled + "." + parts[1]);
 									coupling = rType;
@@ -210,7 +209,7 @@ public class CouplingMapper{
 									for(int word = 2; word < parts.length; word++){
 										coupling = coupling + "." + parts[word];
 									}
-								}else if(parts[1].equals("class") || parts[1].equals("getClass")){
+								}else if(parts[1].equals("class") || parts[1].equals("getClass") || parts[1].equals("getName")){
 									// Filter out .class references
 									coupling = "Class";
 									for(int word = 2; word < parts.length; word++){
@@ -222,7 +221,7 @@ public class CouplingMapper{
 										coupling = coupling + "." + parts[word];
 									}
 								}else{
-									System.out.println("in none");
+									System.out.println("Not Found: " + coupling + "." + parts[1]);
 									break;
 								}
 							}else{
