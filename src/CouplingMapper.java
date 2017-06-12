@@ -180,7 +180,6 @@ public class CouplingMapper{
 								// Get method return type
 								System.out.println("---"+coupled+"."+parts[1]);
 								if(returnTypes.containsKey(coupled + "." + parts[1])){
-									System.out.println("in rtypes");
 									String rType = returnTypes.get(coupled + "." + parts[1]);
 									coupling = rType;
 									// Replace coupling with return type
@@ -189,7 +188,6 @@ public class CouplingMapper{
 									}
 								}else if(variables.containsKey(coupled) && variables.get(coupled).containsKey(parts[1])){
 									// If it isn't a method, it may be a local variable
-									System.out.println("in vars");
 									String rType = variables.get(coupled).get(parts[1]);
 									coupling = rType;
 									// Replace coupling with return type
@@ -197,7 +195,6 @@ public class CouplingMapper{
 										coupling = coupling + "." + parts[word];
 									}
 								}else if(parents.containsKey(coupled)){
-									System.out.println("in parents");
 									// If we lack the return type and it's a project class,
 									// and this is not a reference to a class variable
 									// it is likely inherited from a parent class
@@ -210,6 +207,17 @@ public class CouplingMapper{
 								}else if(parts[1].equals("this")){
 									// References to "this" that get through must be filtered.
 									coupling = coupled;
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(parts[1].equals("class") || parts[1].equals("getClass")){
+									// Filter out .class references
+									coupling = "Class";
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(parts[1].equals("getObject")){
+									coupling = "Object";
 									for(int word = 2; word < parts.length; word++){
 										coupling = coupling + "." + parts[word];
 									}
