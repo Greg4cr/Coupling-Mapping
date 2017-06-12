@@ -22,13 +22,20 @@ import java.util.ArrayList;
 import java.util.Set;
 
 public class CouplingMapper{
-
+	// Couplings between classes
 	private HashMap<String, HashMap<String, ArrayList<String>>> couplings;
+	// Return types of class methods
 	private HashMap<String, String> returnTypes;
+	// Parents of classes
+	private HashMap<String, String> parents;
+	// Global variables (names/types) for each class
+	private HashMap<String, HashMap<String, String>> variables;
 
 	public CouplingMapper(){
 		couplings = new HashMap<String, HashMap<String, ArrayList<String>>>();
 		returnTypes = new HashMap<String, String>();
+		parents = new HashMap<String, String>();
+		variables = new HashMap<String, HashMap<String, String>>();
 	}
 
 	public static void main(String[] args) throws IllegalArgumentException{
@@ -112,11 +119,22 @@ public class CouplingMapper{
 				visitor.visit(tree);
 				HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
 				HashMap<String, String> rTypes = visitor.getReturnTypes();
+				HashMap<String, String> parents = visitor.getParents();
+				HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
 				couplings.put(file, coups);
 
 				for(String key : rTypes.keySet()){
-					System.out.println(key + ":" + rTypes.get(key));
 					returnTypes.put(key, rTypes.get(key));
+				}
+				for(String key: parents.keySet()){
+					parents.put(key, parents.get(key));	
+				}
+
+				for(String key: allVars.keySet()){
+					if(!key.contains(".")){
+						// Looking only for global variables
+						variables.put(key, allVars.get(key));
+					}
 				}
 			}catch(IOException e){
 				e.printStackTrace();
@@ -161,11 +179,43 @@ public class CouplingMapper{
 							if(classList.contains(coupled)){
 								// Get method return type
 								System.out.println("---"+coupled+"."+parts[1]);
-								String rType = returnTypes.get(coupled + "." + parts[1]);
-								// Replace coupling with return type
-								coupling = rType;
-								for(int word = 2; word < parts.length; word++){
-									coupling = coupling + "." + parts[word];
+								if(returnTypes.containsKey(coupled + "." + parts[1])){
+									System.out.println("in rtypes");
+									String rType = returnTypes.get(coupled + "." + parts[1]);
+									coupling = rType;
+									// Replace coupling with return type
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(variables.containsKey(coupled) && variables.get(coupled).containsKey(parts[1])){
+									// If it isn't a method, it may be a local variable
+									System.out.println("in vars");
+									String rType = variables.get(coupled).get(parts[1]);
+									coupling = rType;
+									// Replace coupling with return type
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(parents.containsKey(coupled)){
+									System.out.println("in parents");
+									// If we lack the return type and it's a project class,
+									// and this is not a reference to a class variable
+									// it is likely inherited from a parent class
+									String rType = parents.get(coupled);
+									coupling = rType;
+									// Replace coupling with return type
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(parts[1].equals("this")){
+									// References to "this" that get through must be filtered.
+									coupling = coupled;
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else{
+									System.out.println("in none");
+									break;
 								}
 							}else{
 								// If not, go ahead and break out.
@@ -197,5 +247,13 @@ public class CouplingMapper{
 
 	public HashMap<String, String> getReturnTypes(){
 		return returnTypes;
+	}
+
+	public HashMap<String, String> getParents(){
+		return parents;
+	}
+	
+	public HashMap<String, HashMap<String, String>> getVariables(){
+		return variables;
 	}
 }

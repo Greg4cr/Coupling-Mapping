@@ -23,6 +23,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	private HashMap<String, ArrayList<String>> couplings;
 	private HashMap<String, HashMap<String, String>> variables;
 	private HashMap<String, String> returnTypes;
+	private HashMap<String, String> parents;
 
 	public static void main(String[] args){
 		try{
@@ -54,6 +55,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		couplings = new HashMap<String, ArrayList<String>>();
 		variables = new HashMap<String, HashMap<String, String>>();
 		returnTypes = new HashMap<String, String>();
+		parents = new HashMap<String, String>();
 	}
 
 	/* Gets the class name and whether it inherits from any parents
@@ -70,13 +72,12 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		// Check whether the class inherits from a parent
 		for(int child = 0; child < ctx.getChildCount(); child++){
 			if(ctx.getChild(child).getText().equals("extends")){
-				ArrayList<String> parent = new ArrayList<String>();
-				parent.add(ctx.getChild(child+1).getText());
-				if(parent.get(0).contains("<")){
+				String parent = ctx.getChild(child+1).getText();
+				if(parent.contains("<")){
 					// Strip out specific instantiation. Just need base class name
-					parent.set(0, parent.get(0).substring(0,parent.get(0).indexOf("<")));
+					parent = parent.substring(0,parent.indexOf("<"));
 				}
-				couplings.put(currentClass,parent);
+				parents.put(currentClass,parent);
 				break;
 			}
 		} 
@@ -156,6 +157,10 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		}
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-1).getText();
+		if(name.contains("[")){
+			name = name.substring(0, name.indexOf("["));
+		}
+
 		localVars.put(name, type);
 		variables.put(currentClass+"."+currentMethod, localVars);
 
@@ -185,6 +190,9 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-1).getText();
+		if(name.contains("[")){
+			name = name.substring(0, name.indexOf("["));
+		}
 		localVars.put(name, type);
 		variables.put(currentClass+"."+currentMethod, localVars);
 
@@ -215,6 +223,9 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		for(int child = 0; child < ctx.getChild(1).getChildCount(); child++){
 			if(!ctx.getChild(1).getChild(child).getText().equals(",")){
 				String name = ctx.getChild(1).getChild(child).getChild(0).getText();
+				if(name.contains("[")){
+					name = name.substring(0, name.indexOf("["));
+				}
 				globalVars.put(name, type);
 				variables.put(currentClass, globalVars);
 			}
@@ -249,6 +260,9 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		for(int child = 0; child < ctx.getChild(ctx.getChildCount()-1).getChildCount(); child++){
 			if(!ctx.getChild(ctx.getChildCount()-1).getChild(child).getText().equals(",")){
 				String name = ctx.getChild(ctx.getChildCount()-1).getChild(child).getChild(0).getText();
+				if(name.contains("[")){
+					name = name.substring(0, name.indexOf("["));
+				}
 				localVars.put(name, type);
 				variables.put(currentClass+"."+currentMethod, localVars);
 			}
@@ -349,33 +363,40 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 				
 				// If the "variable" is super, fill in parent class
 				if(var.equals("super")){
-					if(couplings.containsKey(currentClass)){
-						var = couplings.get(currentClass).get(0);
+					if(parents.containsKey(currentClass)){
+						var = parents.get(currentClass);
 					}
 					found = true;
 				}
 
-				// Check globals
-				if(!found){
-					if(variables.containsKey(currentClass)){
-						vars = variables.get(currentClass);
-						for(String current : vars.keySet()){
-							if(current.equals(var)){
-								found = true;
-								var = vars.get(current);
-								break;
-							}
-						}
+				// Check for keyword "this"
+				if(!found){ 
+					if(var.equals("this")){
+						var = currentClass;
+						found = true;
 					}
-					// Then check locals
+					//Check globals
 					if(!found){
-						if(variables.containsKey(currentClass + "." + currentMethod)){
-							vars = variables.get(currentClass + "." + currentMethod);
+						if(variables.containsKey(currentClass)){
+							vars = variables.get(currentClass);
 							for(String current : vars.keySet()){
 								if(current.equals(var)){
-									var = vars.get(current);
 									found = true;
+									var = vars.get(current);
 									break;
+								}
+							}
+						}
+						// Then check locals
+						if(!found){
+							if(variables.containsKey(currentClass + "." + currentMethod)){
+								vars = variables.get(currentClass + "." + currentMethod);
+								for(String current : vars.keySet()){
+									if(current.equals(var)){
+										var = vars.get(current);
+										found = true;
+										break;
+									}
 								}
 							}
 						}
@@ -459,5 +480,9 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 
 	public HashMap<String, String> getReturnTypes(){
 		return returnTypes;
+	}
+	
+	public HashMap<String, String> getParents(){
+		return parents;
 	}
 }
