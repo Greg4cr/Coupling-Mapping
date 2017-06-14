@@ -232,7 +232,7 @@ public class CouplingMapper{
 						}
 						coupled = coupling.substring(0, coupling.indexOf("."));
 						System.out.println(coupling);
-						System.out.println("-----------------------------");
+						System.out.println("-----------------------------:" + clazz);
 					}else{
 						coupled = coupling;
 					}

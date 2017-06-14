@@ -15,6 +15,7 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.ArrayList;
+import java.util.regex.Pattern;
 
 public class CouplingVisitor extends JavaBaseVisitor<Void> {
 
@@ -85,6 +86,16 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		return super.visitChildren(ctx);
 	}
 
+	@Override
+        public Void visitEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
+		currentMethod="";
+
+		// The second child is the class name. 
+		currentClass = ctx.getChild(1).getText();
+
+		return super.visitChildren(ctx);
+	}
+
 	/* Adjusts the current method tracking
 	* methodDeclaration :   (typeType|'void') myMethodName formalParameters ('[' ']')*
         * ('throws' qualifiedNameList)? (methodBody |   ';')
@@ -122,6 +133,8 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		}else{
 			returnTypes.put(currentClass + "." + currentMethod, type);	
 		}
+		// Update couplings to resolve references to static methods.
+		updateCouplings();
 		return super.visitChildren(ctx);
 	}
 
@@ -271,6 +284,39 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		return super.visitChildren(ctx);	
 	}
 
+	/* Adds variables declared in enhanced for loops to the variable list.
+	 * enhancedForControl:   variableModifier* typeType variableDeclaratorId ':' expression
+	 */
+	@Override
+	public Void visitEnhancedForControl(JavaParser.EnhancedForControlContext ctx){
+		HashMap<String, String> localVars;
+		if(variables.containsKey(currentClass+"."+currentMethod)){
+			localVars = variables.get(currentClass+"."+currentMethod);
+		}else{
+			localVars = new HashMap<String, String>();
+		}
+
+		// Type and name are two children away from last child
+		// Variable type
+		String type = ctx.getChild(ctx.getChildCount()-4).getText();
+		if(type.contains("<")){
+			type = type.substring(0, type.indexOf("<"));
+		}
+		if(type.contains("[")){
+			type = type.substring(0, type.indexOf("["));
+		}
+
+		// Variable name
+		String name = ctx.getChild(ctx.getChildCount()-3).getText();
+		if(name.contains("[")){
+			name = name.substring(0, name.indexOf("["));
+		}
+		localVars.put(name, type);
+		variables.put(currentClass+"."+currentMethod, localVars);
+
+		return super.visitChildren(ctx);
+	}
+
 	/* Adds exceptions from catch blocks to variable list
 	* catchClause :   'catch' '(' variableModifier* catchType Identifier ')' block
 	*/
@@ -314,43 +360,49 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 						deps = new ArrayList<String>();
 					}
 				}
-				String expr = ctx.getText();	
-				// Remove arguments
-				if(expr.contains("(")){
-					String[] parts = expr.split("[)]");
-					String newExpr = "";
-					for(int part = 0; part < parts.length; part++){
-						if(parts[part].contains("(")){
-							parts[part] = parts[part].substring(0,parts[part].indexOf("("));
-						}
-						newExpr = newExpr + parts[part];
-					}
-					expr = newExpr;
-				}
+				String expr = ctx.getText();
 				// Remove generics
-				if(expr.contains("<")){
-					String[] parts = expr.split(">");
-					String newExpr = "";
-					for(int part = 0; part < parts.length; part++){
-						if(parts[part].contains("<")){
-							parts[part] = parts[part].substring(0,parts[part].indexOf("<"));
-						}
-						newExpr = newExpr + parts[part];
-					}
-					expr = newExpr;	
-				}
+				expr = expr.replaceAll("<.*?>","");
 				// Remove array references
-				if(expr.contains("[")){
-					String[] parts = expr.split("]");
-					String newExpr = "";
-					for(int part = 0; part < parts.length; part++){
-						if(parts[part].contains("[")){
-							parts[part] = parts[part].substring(0,parts[part].indexOf("["));
+				expr = expr.replaceAll("\\[.*?\\]","");
+								
+				if(expr.contains("(")){
+					// Remove arguments
+					expr = expr.replaceAll("\\\".*?\\\"","String");
+					expr = expr.replaceAll("\\\'.*?\\\'","char");
+						
+					// First portion might contain a cast. 
+					// Need to distinguish cast from arguments.
+					// If first character is "(", then cast.
+					if(expr.indexOf("(")==0){
+						String first = expr.substring(0, expr.indexOf("."));
+						String rest = expr.substring(expr.indexOf("."), expr.length());
+						String castType = "";
+						String[] parts = first.split("[(]");
+						for(int word = 0; word < parts.length; word++){
+							if(!parts[word].equals("")){
+								castType = parts[word].substring(0,parts[word].indexOf(")"));
+								break;
+							}
 						}
-						newExpr = newExpr + parts[part];
+						first = castType;
+						expr = first + rest;
 					}
-					expr = newExpr;	
-				}
+					
+					int include = 0;
+					String newExpr = "";
+					for(char letter : expr.toCharArray()){
+						if(letter == '('){
+							include++;
+						}else if(letter == ')'){
+							include--;
+						}else if(include == 0){
+							newExpr = newExpr + letter;
+						}
+					}	
+					expr = newExpr;
+				}	
+
 				// Find type of referenced variable
 				String var;
 				if(expr.contains(".")){
@@ -399,6 +451,21 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 									}
 								}
 							}
+							// It could also be a static method
+							if(!found){
+								if(returnTypes.containsKey(currentClass + "." + var)){
+									var = returnTypes.get(currentClass + "." + var);
+									found = true; 
+								}
+							
+								// Finally, if it is actually a "new" declaration
+								if(!found && var.contains("new")){
+									if(var.indexOf("new") == 0){
+										var = var.substring(3,var.length());
+										found = true;
+									}
+								}
+							}
 						}
 					}
 				}
@@ -420,6 +487,40 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 			}
 		}
 		return super.visitChildren(ctx);
+	}
+
+	/* Update couplings list to replace references to static methods 
+	 * with the return type of that method.
+	 */
+	public void updateCouplings(){
+		for(String method : couplings.keySet()){
+			ArrayList<String> deps = couplings.get(method);
+
+			for(int expr=0; expr < deps.size(); expr++){
+				// Find type of referenced variable
+				String var = deps.get(expr);
+				if(var.contains(".")){
+					var = var.substring(0,var.indexOf("."));
+				}
+				boolean found = false;
+				
+				if(returnTypes.containsKey(currentClass + "." + var)){
+					var = returnTypes.get(currentClass + "." + var);
+					found = true; 
+				}
+				
+				// Now put the type in
+				if(found){
+					if(deps.get(expr).contains(".")){
+						var = var + deps.get(expr).substring(deps.get(expr).indexOf("."),deps.get(expr).length());
+					}
+					
+					deps.set(expr,var);
+				}
+			}
+			couplings.put(method, deps);
+		}
+
 	}
 
 	/* Captures coupling to constructors (new declarations)
