@@ -113,10 +113,11 @@ public class CouplingMapper{
 				JavaLexer lexer = new JavaLexer(input);
 				CommonTokenStream tokens = new CommonTokenStream(lexer);
 				JavaParser parser = new JavaParser(tokens);
-				JavaParser.CompilationUnitContext tree = parser.compilationUnit(); 
-		
+				ParseTree tree = parser.compilationUnit(); 
+				ParseTreeWalker walker = new ParseTreeWalker();		
 				CouplingVisitor visitor = new CouplingVisitor(); 
-				visitor.visit(tree);
+				walker.walk(visitor, tree);
+
 				HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
 				HashMap<String, String> rTypes = visitor.getReturnTypes();
 				HashMap<String, String> parentList = visitor.getParents();

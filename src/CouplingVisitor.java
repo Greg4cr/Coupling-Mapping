@@ -17,7 +17,7 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.regex.Pattern;
 
-public class CouplingVisitor extends JavaBaseVisitor<Void> {
+public class CouplingVisitor extends JavaBaseListener {
 
 	private String outerClass;
         private String currentClass;
@@ -33,10 +33,10 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 			JavaLexer lexer = new JavaLexer(input);
 			CommonTokenStream tokens = new CommonTokenStream(lexer);
 			JavaParser parser = new JavaParser(tokens);
-			JavaParser.CompilationUnitContext tree = parser.compilationUnit(); 
-		
+			ParseTree tree = parser.compilationUnit();
+			ParseTreeWalker walker = new ParseTreeWalker();
 			CouplingVisitor visitor = new CouplingVisitor(); 
-			visitor.visit(tree);
+			walker.walk(visitor, tree);
 			HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
 
 			System.out.println("# Method, Coupling");
@@ -66,7 +66,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
         * ('implements' typeList)? classBody
 	*/
         @Override
-        public Void visitClassDeclaration(JavaParser.ClassDeclarationContext ctx){
+        public void enterClassDeclaration(JavaParser.ClassDeclarationContext ctx){
 		currentMethod="";
 
 		// The second child is the class name. 
@@ -88,17 +88,28 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 			}
 		} 
 
-		return super.visitChildren(ctx);
 	}
 
 	@Override
-        public Void visitEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
+        public void enterEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
 		currentMethod="";
 
 		// The second child is the class name. 
 		currentClass = ctx.getChild(1).getText();
+		if(outerClass.equals("")){
+			outerClass = currentClass;
+		}
+	}
 
-		return super.visitChildren(ctx);
+	// Reset class name on exit.
+	@Override
+	public void exitClassDeclaration(JavaParser.ClassDeclarationContext ctx){
+		currentClass = outerClass;
+	}
+
+	@Override
+	public void exitEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
+		currentClass = outerClass;
 	}
 
 	/* Adjusts the current method tracking
@@ -106,7 +117,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
         * ('throws' qualifiedNameList)? (methodBody |   ';')
 	*/
 	@Override
-	public Void visitMethodDeclaration(JavaParser.MethodDeclarationContext ctx){
+	public void enterMethodDeclaration(JavaParser.MethodDeclarationContext ctx){
 		currentMethod = ctx.getChild(1).getText();
 		String type = ctx.getChild(0).getText();
 		if(type.contains("<")){
@@ -140,24 +151,21 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		}
 		// Update couplings to resolve references to static methods.
 		updateCouplings();
-		return super.visitChildren(ctx);
 	}
 
 	/* Adjusts current method to the proper constructor
 	* constructorDeclaration:   Identifier formalParameters ('throws' qualifiedNameList)? constructorBody
 	*/
 	@Override 
-	public Void visitConstructorDeclaration(JavaParser.ConstructorDeclarationContext ctx){
+	public void enterConstructorDeclaration(JavaParser.ConstructorDeclarationContext ctx){
 		currentMethod = "constructor";
-		return super.visitChildren(ctx);
-
 	}
 
 	/* Adds parameters to variable list
 	* formalParameter :   variableModifier* typeType variableDeclaratorId
 	*/
 	@Override
-	public Void visitFormalParameter(JavaParser.FormalParameterContext ctx){
+	public void enterFormalParameter(JavaParser.FormalParameterContext ctx){
 		HashMap<String, String> localVars;
 		if(variables.containsKey(currentClass+"."+currentMethod)){
 			localVars = variables.get(currentClass+"."+currentMethod);
@@ -181,15 +189,13 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 
 		localVars.put(name, type);
 		variables.put(currentClass+"."+currentMethod, localVars);
-
-		return super.visitChildren(ctx);
 	}
 
 	/* Adds parameters to variable list
 	* lastFormalParameter :   variableModifier* typeType '...' variableDeclaratorId
 	*/
 	@Override
-	public Void visitLastFormalParameter(JavaParser.LastFormalParameterContext ctx){
+	public void enterLastFormalParameter(JavaParser.LastFormalParameterContext ctx){
 		HashMap<String, String> localVars;
 		if(variables.containsKey(currentClass+"."+currentMethod)){
 			localVars = variables.get(currentClass+"."+currentMethod);
@@ -213,15 +219,13 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		}
 		localVars.put(name, type);
 		variables.put(currentClass+"."+currentMethod, localVars);
-
-		return super.visitChildren(ctx);
 	}
 
 	/* Captures global variables for variable list.
 	*	fieldDeclaration :   typeType variableDeclarators ';'
 	*/
 	@Override
-	public Void visitFieldDeclaration(JavaParser.FieldDeclarationContext ctx){
+	public void enterFieldDeclaration(JavaParser.FieldDeclarationContext ctx){
 		HashMap<String, String> globalVars;
 		if(variables.containsKey(currentClass)){
 			globalVars = variables.get(currentClass);
@@ -248,15 +252,13 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 				variables.put(currentClass, globalVars);
 			}
 		}
-
-		return super.visitChildren(ctx);
 	}
 
 	/* Captures local variables for variable list.
 	*	localVariableDeclaration :   variableModifier* typeType variableDeclarators
 	*/
 	@Override
-	public Void visitLocalVariableDeclaration(JavaParser.LocalVariableDeclarationContext ctx){
+	public void enterLocalVariableDeclaration(JavaParser.LocalVariableDeclarationContext ctx){
 		HashMap<String, String> localVars;
 		if(variables.containsKey(currentClass+"."+currentMethod)){
 			localVars = variables.get(currentClass+"."+currentMethod);
@@ -285,15 +287,13 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 				variables.put(currentClass+"."+currentMethod, localVars);
 			}
 		}
-
-		return super.visitChildren(ctx);	
 	}
 
 	/* Adds variables declared in enhanced for loops to the variable list.
 	 * enhancedForControl:   variableModifier* typeType variableDeclaratorId ':' expression
 	 */
 	@Override
-	public Void visitEnhancedForControl(JavaParser.EnhancedForControlContext ctx){
+	public void enterEnhancedForControl(JavaParser.EnhancedForControlContext ctx){
 		HashMap<String, String> localVars;
 		if(variables.containsKey(currentClass+"."+currentMethod)){
 			localVars = variables.get(currentClass+"."+currentMethod);
@@ -318,15 +318,13 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		}
 		localVars.put(name, type);
 		variables.put(currentClass+"."+currentMethod, localVars);
-
-		return super.visitChildren(ctx);
 	}
 
 	/* Adds exceptions from catch blocks to variable list
 	* catchClause :   'catch' '(' variableModifier* catchType Identifier ')' block
 	*/
 	@Override
-	public Void visitCatchClause(JavaParser.CatchClauseContext ctx){
+	public void enterCatchClause(JavaParser.CatchClauseContext ctx){
 		HashMap<String, String> localVars;
 		if(variables.containsKey(currentClass+"."+currentMethod)){
 			localVars = variables.get(currentClass+"."+currentMethod);
@@ -341,13 +339,11 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 		String name = ctx.getChild(ctx.getChildCount()-3).getText();
 		localVars.put(name, type);
 		variables.put(currentClass+"."+currentMethod, localVars);
-
-		return super.visitChildren(ctx);
 	}
 
 	// Capture coupling from expression
 	@Override
-	public Void visitExpression(JavaParser.ExpressionContext ctx){
+	public void enterExpression(JavaParser.ExpressionContext ctx){
 		// Child 2 should be a "." to count
 		if(ctx.getChildCount() > 2){
 			if(ctx.getChild(1).getText().equals(".")){
@@ -512,7 +508,6 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 				}
 			}
 		}
-		return super.visitChildren(ctx);
 	}
 
 	/* Update couplings list to replace references to static methods 
@@ -554,7 +549,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	* |   createdName (arrayCreatorRest | classCreatorRest)
 	*/
 	@Override
-	public Void visitCreator(JavaParser.CreatorContext ctx){
+	public void enterCreator(JavaParser.CreatorContext ctx){
 		String type = ctx.getChild(ctx.getChildCount()-2).getText();
 		if(type.contains("<")){
 			type = type.substring(0, type.indexOf("<"));
@@ -585,7 +580,6 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 			couplings.put(currentClass, deps);
 		}
 
-		return super.visitChildren(ctx);
 	}
 
         // Getters and setters
