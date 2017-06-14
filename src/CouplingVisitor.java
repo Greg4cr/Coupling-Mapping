@@ -19,6 +19,7 @@ import java.util.regex.Pattern;
 
 public class CouplingVisitor extends JavaBaseVisitor<Void> {
 
+	private String outerClass;
         private String currentClass;
 	private String currentMethod;
 	private HashMap<String, ArrayList<String>> couplings;
@@ -51,6 +52,7 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	}
 
 	public CouplingVisitor(){
+		outerClass = "";
 		currentClass = "";
 		currentMethod = "";
 		couplings = new HashMap<String, ArrayList<String>>();
@@ -69,6 +71,9 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 
 		// The second child is the class name. 
 		currentClass = ctx.getChild(1).getText();
+		if(outerClass.equals("")){
+			outerClass = currentClass;
+		}
 
 		// Check whether the class inherits from a parent
 		for(int child = 0; child < ctx.getChildCount(); child++){
@@ -427,48 +432,69 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 						var = currentClass;
 						found = true;
 					}
-					//Check globals
-					if(!found){
-						if(variables.containsKey(currentClass)){
-							vars = variables.get(currentClass);
-							for(String current : vars.keySet()){
-								if(current.equals(var)){
-									found = true;
-									var = vars.get(current);
-									break;
-								}
-							}
-						}
-						// Then check locals
-						if(!found){
-							if(variables.containsKey(currentClass + "." + currentMethod)){
-								vars = variables.get(currentClass + "." + currentMethod);
-								for(String current : vars.keySet()){
-									if(current.equals(var)){
-										var = vars.get(current);
-										found = true;
-										break;
-									}
-								}
-							}
-							// It could also be a static method
-							if(!found){
-								if(returnTypes.containsKey(currentClass + "." + var)){
-									var = returnTypes.get(currentClass + "." + var);
-									found = true; 
-								}
-							
-								// Finally, if it is actually a "new" declaration
-								if(!found && var.contains("new")){
-									if(var.indexOf("new") == 0){
-										var = var.substring(3,var.length());
-										found = true;
-									}
-								}
+				}
+				//Check globals
+				if(!found){
+					if(variables.containsKey(currentClass)){
+						vars = variables.get(currentClass);
+						for(String current : vars.keySet()){
+							if(current.equals(var)){
+								found = true;
+								var = vars.get(current);
+								break;
 							}
 						}
 					}
 				}
+				// Then check locals
+				if(!found){
+					if(variables.containsKey(currentClass + "." + currentMethod)){
+						vars = variables.get(currentClass + "." + currentMethod);
+						for(String current : vars.keySet()){
+							if(current.equals(var)){
+								var = vars.get(current);
+								found = true;
+								break;
+							}
+						}
+					}
+				}
+				// It could also be a static method
+				if(!found){
+					if(returnTypes.containsKey(currentClass + "." + var)){
+						var = returnTypes.get(currentClass + "." + var);
+						found = true; 
+					}
+				}
+
+				// It can also be a global variable or method from the outer class
+				if(!found){
+					if(variables.containsKey(outerClass)){
+						vars = variables.get(outerClass);
+						for(String current : vars.keySet()){
+							if(current.equals(var)){
+								found = true;
+								var = vars.get(current);
+								break;
+							}
+						}
+					}	
+					if(!found){
+						if(returnTypes.containsKey(outerClass + "." + var)){
+							var = returnTypes.get(outerClass + "." + var);
+							found = true; 
+						}
+					}
+				} 
+							
+				// Finally, if it is actually a "new" declaration
+				if(!found && var.contains("new")){
+					if(var.indexOf("new") == 0){
+						var = var.substring(3,var.length());
+						found = true;
+					}
+				}
+				
 				
 				// Now put the type in
 				if(found){
@@ -563,7 +589,11 @@ public class CouplingVisitor extends JavaBaseVisitor<Void> {
 	}
 
         // Getters and setters
-        public String getCurrentClass(){
+ 	public String getOuterClass(){
+		return outerClass;
+	}
+
+	public String getCurrentClass(){
 		return currentClass;
 	}
 
