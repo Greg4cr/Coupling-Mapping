@@ -15,13 +15,11 @@ import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.ArrayList;
-import java.util.regex.Pattern;
+import java.util.Stack;
 
 public class CouplingVisitor extends JavaBaseListener {
 
-	private String outerClass;
-        private String currentClass;
-	private String currentMethod;
+	private Stack<String> location;
 	private HashMap<String, ArrayList<String>> couplings;
 	private HashMap<String, HashMap<String, String>> variables;
 	private HashMap<String, String> returnTypes;
@@ -52,9 +50,7 @@ public class CouplingVisitor extends JavaBaseListener {
 	}
 
 	public CouplingVisitor(){
-		outerClass = "";
-		currentClass = "";
-		currentMethod = "";
+		location = new Stack<String>();
 		couplings = new HashMap<String, ArrayList<String>>();
 		variables = new HashMap<String, HashMap<String, String>>();
 		returnTypes = new HashMap<String, String>();
@@ -67,13 +63,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	*/
         @Override
         public void enterClassDeclaration(JavaParser.ClassDeclarationContext ctx){
-		currentMethod="";
-
 		// The second child is the class name. 
-		currentClass = ctx.getChild(1).getText();
-		if(outerClass.equals("")){
-			outerClass = currentClass;
-		}
+		location.push(ctx.getChild(1).getText());
 
 		// Check whether the class inherits from a parent
 		for(int child = 0; child < ctx.getChildCount(); child++){
@@ -83,7 +74,7 @@ public class CouplingVisitor extends JavaBaseListener {
 					// Strip out specific instantiation. Just need base class name
 					parent = parent.substring(0,parent.indexOf("<"));
 				}
-				parents.put(currentClass,parent);
+				parents.put(location.peek(),parent);
 				break;
 			}
 		} 
@@ -92,24 +83,41 @@ public class CouplingVisitor extends JavaBaseListener {
 
 	@Override
         public void enterEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
-		currentMethod="";
-
 		// The second child is the class name. 
-		currentClass = ctx.getChild(1).getText();
-		if(outerClass.equals("")){
-			outerClass = currentClass;
-		}
+		location.push(ctx.getChild(1).getText());
+	}
+
+	@Override
+        public void enterInterfaceDeclaration(JavaParser.InterfaceDeclarationContext ctx){
+		// The second child is the class name. 
+		location.push(ctx.getChild(1).getText());
+	}
+
+	@Override
+        public void enterAnnotationTypeDeclaration(JavaParser.AnnotationTypeDeclarationContext ctx){
+		// The third child is the class name. 
+		location.push(ctx.getChild(2).getText());
 	}
 
 	// Reset class name on exit.
 	@Override
 	public void exitClassDeclaration(JavaParser.ClassDeclarationContext ctx){
-		currentClass = outerClass;
+		location.pop();
 	}
 
 	@Override
 	public void exitEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
-		currentClass = outerClass;
+		location.pop();
+	}
+
+	@Override
+	public void exitInterfaceDeclaration(JavaParser.InterfaceDeclarationContext ctx){
+		location.pop();
+	}
+
+	@Override
+	public void exitAnnotationTypeDeclaration(JavaParser.AnnotationTypeDeclarationContext ctx){
+		location.pop();
 	}
 
 	/* Adjusts the current method tracking
@@ -118,7 +126,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	*/
 	@Override
 	public void enterMethodDeclaration(JavaParser.MethodDeclarationContext ctx){
-		currentMethod = ctx.getChild(1).getText();
+		location.push(location.peek() + "." + ctx.getChild(1).getText());
+
 		String type = ctx.getChild(0).getText();
 		if(type.contains("<")){
 			type = type.substring(0, type.indexOf("<"));
@@ -127,8 +136,8 @@ public class CouplingVisitor extends JavaBaseListener {
 			type = type.substring(0, type.indexOf("["));
 		}
 
-		if(returnTypes.containsKey(currentMethod)){
-			String existing = returnTypes.get(currentMethod);
+		if(returnTypes.containsKey(location.peek())){
+			String existing = returnTypes.get(location.peek());
 			boolean exists = false;
 			if(existing.contains(",")){
 				String[] types = existing.split(",");
@@ -143,11 +152,11 @@ public class CouplingVisitor extends JavaBaseListener {
 				}
 			}
 			if(!exists){
-				type = type + "," + returnTypes.get(currentMethod);
-				returnTypes.put(currentClass + "." + currentMethod, type);
+				type = type + "," + returnTypes.get(location.peek());
+				returnTypes.put(location.peek(), type);
 			}
 		}else{
-			returnTypes.put(currentClass + "." + currentMethod, type);	
+			returnTypes.put(location.peek(), type);	
 		}
 		// Update couplings to resolve references to static methods.
 		updateCouplings();
@@ -158,18 +167,18 @@ public class CouplingVisitor extends JavaBaseListener {
 	*/
 	@Override 
 	public void enterConstructorDeclaration(JavaParser.ConstructorDeclarationContext ctx){
-		currentMethod = "constructor";
+		location.push(location.peek() + ".constructor");
 	}
 
 	// Reset current method name on exit from a method
 	@Override
 	public void exitMethodDeclaration(JavaParser.MethodDeclarationContext ctx){
-		currentMethod = "";
+		location.pop();
 	}
 
 	@Override
 	public void exitConstructorDeclaration(JavaParser.ConstructorDeclarationContext ctx){
-		currentMethod = "";
+		location.pop();
 	}
 
 	/* Adds parameters to variable list
@@ -178,8 +187,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterFormalParameter(JavaParser.FormalParameterContext ctx){
 		HashMap<String, String> localVars;
-		if(variables.containsKey(currentClass+"."+currentMethod)){
-			localVars = variables.get(currentClass+"."+currentMethod);
+		if(variables.containsKey(location.peek())){
+			localVars = variables.get(location.peek());
 		}else{
 			localVars = new HashMap<String, String>();
 		}
@@ -199,7 +208,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 
 		localVars.put(name, type);
-		variables.put(currentClass+"."+currentMethod, localVars);
+		variables.put(location.peek(), localVars);
 	}
 
 	/* Adds parameters to variable list
@@ -208,8 +217,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterLastFormalParameter(JavaParser.LastFormalParameterContext ctx){
 		HashMap<String, String> localVars;
-		if(variables.containsKey(currentClass+"."+currentMethod)){
-			localVars = variables.get(currentClass+"."+currentMethod);
+		if(variables.containsKey(location.peek())){
+			localVars = variables.get(location.peek());
 		}else{
 			localVars = new HashMap<String, String>();
 		}
@@ -229,7 +238,7 @@ public class CouplingVisitor extends JavaBaseListener {
 			name = name.substring(0, name.indexOf("["));
 		}
 		localVars.put(name, type);
-		variables.put(currentClass+"."+currentMethod, localVars);
+		variables.put(location.peek(), localVars);
 	}
 
 	/* Captures global variables for variable list.
@@ -238,8 +247,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterFieldDeclaration(JavaParser.FieldDeclarationContext ctx){
 		HashMap<String, String> globalVars;
-		if(variables.containsKey(currentClass)){
-			globalVars = variables.get(currentClass);
+		if(variables.containsKey(location.peek())){
+			globalVars = variables.get(location.peek());
 		}else{
 			globalVars = new HashMap<String, String>();
 		}
@@ -260,7 +269,7 @@ public class CouplingVisitor extends JavaBaseListener {
 					name = name.substring(0, name.indexOf("["));
 				}
 				globalVars.put(name, type);
-				variables.put(currentClass, globalVars);
+				variables.put(location.peek(), globalVars);
 			}
 		}
 	}
@@ -271,8 +280,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterLocalVariableDeclaration(JavaParser.LocalVariableDeclarationContext ctx){
 		HashMap<String, String> localVars;
-		if(variables.containsKey(currentClass+"."+currentMethod)){
-			localVars = variables.get(currentClass+"."+currentMethod);
+		if(variables.containsKey(location.peek())){
+			localVars = variables.get(location.peek());
 		}else{
 			localVars = new HashMap<String, String>();
 		}
@@ -295,7 +304,7 @@ public class CouplingVisitor extends JavaBaseListener {
 					name = name.substring(0, name.indexOf("["));
 				}
 				localVars.put(name, type);
-				variables.put(currentClass+"."+currentMethod, localVars);
+				variables.put(location.peek(), localVars);
 			}
 		}
 	}
@@ -306,8 +315,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterEnhancedForControl(JavaParser.EnhancedForControlContext ctx){
 		HashMap<String, String> localVars;
-		if(variables.containsKey(currentClass+"."+currentMethod)){
-			localVars = variables.get(currentClass+"."+currentMethod);
+		if(variables.containsKey(location.peek())){
+			localVars = variables.get(location.peek());
 		}else{
 			localVars = new HashMap<String, String>();
 		}
@@ -328,7 +337,7 @@ public class CouplingVisitor extends JavaBaseListener {
 			name = name.substring(0, name.indexOf("["));
 		}
 		localVars.put(name, type);
-		variables.put(currentClass+"."+currentMethod, localVars);
+		variables.put(location.peek(), localVars);
 	}
 
 	/* Adds exceptions from catch blocks to variable list
@@ -337,8 +346,8 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterCatchClause(JavaParser.CatchClauseContext ctx){
 		HashMap<String, String> localVars;
-		if(variables.containsKey(currentClass+"."+currentMethod)){
-			localVars = variables.get(currentClass+"."+currentMethod);
+		if(variables.containsKey(location.peek())){
+			localVars = variables.get(location.peek());
 		}else{
 			localVars = new HashMap<String, String>();
 		}
@@ -349,7 +358,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-3).getText();
 		localVars.put(name, type);
-		variables.put(currentClass+"."+currentMethod, localVars);
+		variables.put(location.peek(), localVars);
 	}
 
 	// Capture coupling from expression
@@ -359,18 +368,10 @@ public class CouplingVisitor extends JavaBaseListener {
 		if(ctx.getChildCount() > 2){
 			if(ctx.getChild(1).getText().equals(".")){
 				ArrayList<String> deps;
-				if(!currentMethod.equals("")){
-					if(couplings.containsKey(currentClass + "." + currentMethod)){
-						deps = couplings.get(currentClass + "." + currentMethod);
-					}else{	
-						deps = new ArrayList<String>();
-					}
-				}else{
-					if(couplings.containsKey(currentClass)){
-						deps = couplings.get(currentClass);
-					}else{	
-						deps = new ArrayList<String>();
-					}
+				if(couplings.containsKey(location.peek())){
+					deps = couplings.get(location.peek());
+				}else{	
+					deps = new ArrayList<String>();
 				}
 				String expr = ctx.getText();
 				// Remove generics
@@ -427,23 +428,27 @@ public class CouplingVisitor extends JavaBaseListener {
 				
 				// If the "variable" is super, fill in parent class
 				if(var.equals("super")){
-					if(parents.containsKey(currentClass)){
-						var = parents.get(currentClass);
+					if(parents.containsKey(location.peek())){
+						var = parents.get(location.peek());
+						found = true;
 					}
-					found = true;
 				}
 
 				// Check for keyword "this"
 				if(!found){ 
 					if(var.equals("this")){
-						var = currentClass;
+						if(location.peek().contains(".")){
+							var = location.peek().substring(0,location.peek().indexOf("."));
+						}else{
+							var = location.peek();
+						}
 						found = true;
 					}
 				}
 				//Check globals
 				if(!found){
-					if(variables.containsKey(currentClass)){
-						vars = variables.get(currentClass);
+					if(variables.containsKey(location.peek())){
+						vars = variables.get(location.peek());
 						for(String current : vars.keySet()){
 							if(current.equals(var)){
 								found = true;
@@ -455,8 +460,8 @@ public class CouplingVisitor extends JavaBaseListener {
 				}
 				// Then check locals
 				if(!found){
-					if(variables.containsKey(currentClass + "." + currentMethod)){
-						vars = variables.get(currentClass + "." + currentMethod);
+					if(variables.containsKey(location.peek())){
+						vars = variables.get(location.peek());
 						for(String current : vars.keySet()){
 							if(current.equals(var)){
 								var = vars.get(current);
@@ -468,6 +473,14 @@ public class CouplingVisitor extends JavaBaseListener {
 				}
 				// It could also be a static method
 				if(!found){
+					Stack<String> nesting = (Stack<String>) location.clone();
+					String currentClass = "";
+					while(!nesting.isEmpty()){
+						currentClass = nesting.pop();
+						if(!nesting.contains(".")){
+							break;
+						}
+					}
 					if(returnTypes.containsKey(currentClass + "." + var)){
 						var = returnTypes.get(currentClass + "." + var);
 						found = true; 
@@ -475,21 +488,31 @@ public class CouplingVisitor extends JavaBaseListener {
 				}
 
 				// It can also be a global variable or method from the outer class
+				
 				if(!found){
-					if(variables.containsKey(outerClass)){
-						vars = variables.get(outerClass);
-						for(String current : vars.keySet()){
-							if(current.equals(var)){
-								found = true;
-								var = vars.get(current);
-								break;
+					Stack<String> nesting = (Stack<String>) location.clone();
+					while(!nesting.isEmpty()){
+						String level = nesting.pop();
+						if(!level.contains(".")){
+							if(variables.containsKey(level)){
+								vars = variables.get(level);
+								for(String current : vars.keySet()){
+									if(current.equals(var)){
+										found = true;
+										var = vars.get(current);
+										break;
+									}
+								}
+							}		
+							if(!found){
+								if(returnTypes.containsKey(level + "." + var)){
+									var = returnTypes.get(level + "." + var);
+									found = true; 
+								}
 							}
 						}
-					}	
-					if(!found){
-						if(returnTypes.containsKey(outerClass + "." + var)){
-							var = returnTypes.get(outerClass + "." + var);
-							found = true; 
+						if(found){
+							break;
 						}
 					}
 				} 
@@ -512,11 +535,7 @@ public class CouplingVisitor extends JavaBaseListener {
 					}
 				}
 				deps.add(expr);
-				if(!currentMethod.equals("")){
-					couplings.put(currentClass + "." + currentMethod, deps);
-				}else{
-					couplings.put(currentClass, deps);
-				}
+				couplings.put(location.peek(), deps);
 			}
 		}
 	}
@@ -526,6 +545,12 @@ public class CouplingVisitor extends JavaBaseListener {
 	 */
 	public void updateCouplings(){
 		for(String method : couplings.keySet()){
+			String clazz = "";
+			if(method.contains(".")){
+				clazz = method.substring(0,method.indexOf("."));
+			}else{
+				clazz = method;
+			}
 			ArrayList<String> deps = couplings.get(method);
 
 			for(int expr=0; expr < deps.size(); expr++){
@@ -536,8 +561,8 @@ public class CouplingVisitor extends JavaBaseListener {
 				}
 				boolean found = false;
 				
-				if(returnTypes.containsKey(currentClass + "." + var)){
-					var = returnTypes.get(currentClass + "." + var);
+				if(returnTypes.containsKey(clazz + "." + var)){
+					var = returnTypes.get(clazz + "." + var);
 					found = true; 
 				}
 				
@@ -570,40 +595,19 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 
 		ArrayList<String> deps;
-		if(!currentMethod.equals("")){
-			if(couplings.containsKey(currentClass + "." + currentMethod)){
-				deps = couplings.get(currentClass + "." + currentMethod);
-			}else{	
-				deps = new ArrayList<String>();
-			}
-		}else{
-			if(couplings.containsKey(currentClass)){
-				deps = couplings.get(currentClass);
-			}else{	
-				deps = new ArrayList<String>();
-			}
+		if(couplings.containsKey(location.peek())){
+			deps = couplings.get(location.peek());
+		}else{	
+			deps = new ArrayList<String>();
 		}
 
 		deps.add(type);
-		if(!currentMethod.equals("")){
-			couplings.put(currentClass + "." + currentMethod, deps);
-		}else{
-			couplings.put(currentClass, deps);
-		}
-
+		couplings.put(location.peek(), deps);
 	}
 
         // Getters and setters
- 	public String getOuterClass(){
-		return outerClass;
-	}
-
-	public String getCurrentClass(){
-		return currentClass;
-	}
-
-	public String getCurrentMethod(){
-		return currentMethod;
+ 	public Stack<String> getLocation(){
+		return location;
 	}
 
 	public HashMap<String,ArrayList<String>> getCouplings(){
