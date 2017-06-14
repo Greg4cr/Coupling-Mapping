@@ -161,6 +161,17 @@ public class CouplingVisitor extends JavaBaseListener {
 		currentMethod = "constructor";
 	}
 
+	// Reset current method name on exit from a method
+	@Override
+	public void exitMethodDeclaration(JavaParser.MethodDeclarationContext ctx){
+		currentMethod = "";
+	}
+
+	@Override
+	public void exitConstructorDeclaration(JavaParser.ConstructorDeclarationContext ctx){
+		currentMethod = "";
+	}
+
 	/* Adds parameters to variable list
 	* formalParameter :   variableModifier* typeType variableDeclaratorId
 	*/
