@@ -222,7 +222,7 @@ public class CouplingMapper{
 										coupling = coupling + "." + parts[word];
 									}
 								}else{
-									System.out.println("Not Found: " + coupling + "." + parts[1]);
+									System.out.println("Not Found: " + coupling);
 									break;
 								}
 							}else{
@@ -231,6 +231,7 @@ public class CouplingMapper{
 							}
 							parts = coupling.split("\\.");
 						}
+
 						coupled = coupling.substring(0, coupling.indexOf("."));
 						System.out.println(coupling);
 						System.out.println("-----------------------------:" + clazz);

@@ -428,8 +428,18 @@ public class CouplingVisitor extends JavaBaseListener {
 				
 				// If the "variable" is super, fill in parent class
 				if(var.equals("super")){
-					if(parents.containsKey(location.peek())){
-						var = parents.get(location.peek());
+					String pName = "";
+					if(location.peek().contains(".")){
+						pName = location.peek().substring(0, location.peek().indexOf("."));
+					}else{
+						pName = location.peek();
+					}
+					if(parents.containsKey(pName)){
+						var = parents.get(pName);
+						found = true;
+					}else{
+						// If no parent, all classes descend from Object
+						var = "Object";
 						found = true;
 					}
 				}
@@ -603,6 +613,41 @@ public class CouplingVisitor extends JavaBaseListener {
 
 		deps.add(type);
 		couplings.put(location.peek(), deps);
+		// If there is an anonymous class, we update location
+		location.push(type);
+	}
+	
+	@Override
+	public void enterClassCreatorRest(JavaParser.ClassCreatorRestContext ctx){
+		// If this creator really includes an anonymous class, add it to the parent list
+		if(ctx.getChildCount() > 1){
+			parents.put(location.peek(), location.peek());
+		}
+	}
+	
+	@Override
+	public void exitCreator(JavaParser.CreatorContext ctx){
+		// Exit inner class
+		location.pop();
+	}
+
+	@Override
+	public void enterInnerCreator(JavaParser.InnerCreatorContext ctx){
+		String type = ctx.getChild(0).getText();
+		if(type.contains("<")){
+			type = type.substring(0, type.indexOf("<"));
+		}
+		if(type.contains("[")){
+			type = type.substring(0, type.indexOf("["));
+		}
+
+		// If there is an anonymous class, we update location
+		location.push(type);
+	}
+	
+	@Override
+	public void exitInnerCreator(JavaParser.InnerCreatorContext ctx){
+		location.pop();
 	}
 
         // Getters and setters
