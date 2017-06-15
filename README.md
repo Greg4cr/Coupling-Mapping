@@ -13,7 +13,11 @@ Use
 
 The project can be compiled using the provided ant file (target "ant compile"). First, run target "ant antlr" to generate Java code required for parsing. 
 
-The Java class CouplingVisitor generates a CSV file for an individual .Java file of couplings (Class.Method -> Class.variable/method).
+Class CouplingMapper is the main entry point. It generates a CSV file of couplings (Class.method -> Class.variable/method) for all Java classes in a project. It takes one argument - a path to the directory where Java files are contained. It recursively searches all subdirectories for Java files.
+
+'java -cp ".:lib/antlr-4.5.3-complete.jar" CouplingMapper /path/to/dir/'
+
+The Java class CouplingVisitor generates a CSV file for an individual .Java file of couplings (Class.Method -> Class.variable/method). This is an unfiltered list (layered calls not simplified). CouplingMapper uses this, then filters the results.
 
 Requirements
 ------------------------

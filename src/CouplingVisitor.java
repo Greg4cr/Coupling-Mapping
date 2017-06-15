@@ -378,12 +378,13 @@ public class CouplingVisitor extends JavaBaseListener {
 				expr = expr.replaceAll("<.*?>","");
 				// Remove array references
 				expr = expr.replaceAll("\\[.*?\\]","");
-								
+				// Replace strings with generic filler.
+				expr = expr.replaceAll("\\\".*?\\\"","String");
+				expr = expr.replaceAll("\\\'.*?\\\'","char");
+			
 				if(expr.contains("(")){
 					// Remove arguments
-					expr = expr.replaceAll("\\\".*?\\\"","String");
-					expr = expr.replaceAll("\\\'.*?\\\'","char");
-						
+											
 					// First portion might contain a cast. 
 					// Need to distinguish cast from arguments.
 					// If first character is "(", then cast.
@@ -614,13 +615,8 @@ public class CouplingVisitor extends JavaBaseListener {
 		deps.add(type);
 		couplings.put(location.peek(), deps);
 		// If there is an anonymous class, we update location
-		location.push(type);
-	}
-	
-	@Override
-	public void enterClassCreatorRest(JavaParser.ClassCreatorRestContext ctx){
-		// If this creator really includes an anonymous class, add it to the parent list
-		if(ctx.getChildCount() > 1){
+		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
+			location.push(type);
 			parents.put(location.peek(), location.peek());
 		}
 	}
@@ -628,7 +624,10 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void exitCreator(JavaParser.CreatorContext ctx){
 		// Exit inner class
-		location.pop();
+		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
+			location.pop();
+			parents.put(location.peek(), location.peek());
+		}
 	}
 
 	@Override
@@ -642,7 +641,10 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 
 		// If there is an anonymous class, we update location
-		location.push(type);
+		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
+			location.push(type);
+			parents.put(location.peek(), location.peek());
+		}	
 	}
 	
 	@Override
