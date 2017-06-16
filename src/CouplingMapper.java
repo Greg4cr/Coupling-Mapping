@@ -20,8 +20,11 @@ import java.io.IOException;
 import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Set;
+import java.util.HashSet;
 
 public class CouplingMapper{
+	// List of classes
+	private ArrayList<String> classList;
 	// Couplings between classes
 	private HashMap<String, HashMap<String, ArrayList<String>>> couplings;
 	// Return types of class methods
@@ -32,6 +35,7 @@ public class CouplingMapper{
 	private HashMap<String, HashMap<String, String>> variables;
 
 	public CouplingMapper(){
+		classList = new ArrayList<String>();
 		couplings = new HashMap<String, HashMap<String, ArrayList<String>>>();
 		returnTypes = new HashMap<String, String>();
 		parents = new HashMap<String, String>();
@@ -118,23 +122,60 @@ public class CouplingMapper{
 				CouplingVisitor visitor = new CouplingVisitor(); 
 				walker.walk(visitor, tree);
 
-				HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
-				HashMap<String, String> rTypes = visitor.getReturnTypes();
-				HashMap<String, String> parentList = visitor.getParents();
-				HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
-				couplings.put(file, coups);
+				if(visitor.getCanCouple()){
+					ArrayList<String> classes = visitor.getClasses();
+					HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
+					HashMap<String, String> rTypes = visitor.getReturnTypes();
+					HashMap<String, String> parentList = visitor.getParents();
+					HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
+					couplings.put(file, coups);
 
-				for(String key : rTypes.keySet()){
-					returnTypes.put(key, rTypes.get(key));
-				}
-				for(String key: parentList.keySet()){
-					parents.put(key, parentList.get(key));	
-				}
+					for(String clazz : classes){
+						if(classList.contains(clazz)){
+							System.out.println("Warning: Multiple Class Definitions: " + clazz);
+						}else{
+							classList.add(clazz);
+						}
+					}
 
-				for(String key: allVars.keySet()){
-					if(!key.contains(".")){
-						// Looking only for global variables
-						variables.put(key, allVars.get(key));
+					for(String key : rTypes.keySet()){
+						if(returnTypes.containsKey(key)){
+							if(!returnTypes.get(key).equals(rTypes.get(key))){
+								System.out.println("Warning: Multiple Method Definitions: " + key + " = {" + returnTypes.get(key) + ", " + rTypes.get(key) + "}");
+							}
+						}
+						returnTypes.put(key, rTypes.get(key));
+					}
+					for(String key: parentList.keySet()){
+						if(parents.containsKey(key)){
+							if(!parents.get(key).equals(parentList.get(key))){
+								System.out.println("Warning: Multiple Class Definitions: " + key + ", Conflicting Parents = {" + parents.get(key) + ", " + parentList.get(key) + "}");
+							}
+						}
+						parents.put(key, parentList.get(key));	
+					}
+
+					for(String key: allVars.keySet()){
+						if(!key.contains(".")){
+							// Looking only for global variables
+							HashMap<String, String> gVars = allVars.get(key);
+			
+							if(variables.containsKey(key)){
+								HashMap<String, String> eVars = variables.get(key);
+								for(String gv: gVars.keySet()){
+									if(eVars.containsKey(gv)){
+										if(!eVars.get(gv).equals(gVars.get(gv))){
+											System.out.println("Warning: Multiple Class Definitions: " + key + ", Conflicting Variable: " + gv + " = {" + eVars.get(gv) + ", " + gVars.get(gv) + "}");
+										}
+									}
+									eVars.put(gv, gVars.get(gv));
+								}	
+								variables.put(key, eVars);
+							}else{
+								variables.put(key, gVars);
+							}
+							//System.out.println(key + ":" + variables.get(key));
+						}
 					}
 				}
 			}catch(IOException e){
@@ -149,33 +190,49 @@ public class CouplingMapper{
 	 * In this process, non-project classes are also removed.
 	 */
 	public void filterCouplings(){
-		Set<String> pathList = couplings.keySet();
-		ArrayList<String> classList = new ArrayList<String>();
-		// Classlist stored as paths. Filter for just the class name
-		for(String path : pathList){
-			String[] parts = path.split("/");
-			String cName = parts[parts.length - 1];
-			cName = cName.substring(0, cName.indexOf("."));
-			classList.add(cName);
-		}
 
-		for(String clazz : pathList){
+		for(String clazz : couplings.keySet()){
 			HashMap<String, ArrayList<String>> coups = couplings.get(clazz);
 			for(String method : coups.keySet()){
 				ArrayList<String> mCoups = coups.get(method);
 				ArrayList<String> filteredCoups = new ArrayList<String>(); 
 				for(int index = 0; index < mCoups.size(); index++){
+					System.out.println("-----------------------------:" + clazz);
 					// Go over each coupling. These are indexed by class/method.
 					String coupling = mCoups.get(index);
 					String coupled = "";
 
+					System.out.println(coupling);
+
 					// If there are 2+ "." characters, we want to simplify
 					if(coupling.contains(".")){
 						String[] parts = coupling.split("\\.");
+						coupled = parts[0];
+						// References to methods of a parent might get through.
+						if(!classList.contains(coupled)){
+							String cName = "";
+							if(method.contains(".")){
+								cName = method.substring(0, method.indexOf("."));
+							}else{
+								cName = method;
+							}
+							if(parents.containsKey(cName)){
+								String pName = parents.get(cName);
+								// See if it is defined in the parent
+								if(returnTypes.containsKey(pName + "." + coupled)){
+									coupling = returnTypes.get(pName + "." + coupled);
+									// Replace coupling with return type
+									for(int word = 1; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}
+							}
+						}
+
 						while(parts.length > 2){
 							System.out.println(coupling);
 							// Get initial object
-							coupled = parts[0];
+							coupled = parts[0];	
 							// Is this part of the project?
 							if(classList.contains(coupled)){
 								// Get method return type
@@ -194,6 +251,28 @@ public class CouplingMapper{
 									for(int word = 2; word < parts.length; word++){
 										coupling = coupling + "." + parts[word];
 									}
+								}else if(parts[1].equals("this")){
+									// References to "this" that get through must be filtered.
+									coupling = coupled;
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(parts[1].equals("class") || parts[1].equals("getClass") || parts[1].equals("getName") || parts[1].equals("getType")){
+									// Filter out .class references
+									coupling = "Class";
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(parts[1].equals("getObject") || parts[1].equals("clone")){
+									coupling = "Object";
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
+								}else if(parts[1].equals("equals") || parts[1].equals("finalize") || parts[1].equals("hashCode") || parts[1].equals("notify") || parts[1].equals("notifyAll") || parts[1].equals("toString") || parts[1].equals("wait")){
+									coupling = "primitive";
+									for(int word = 2; word < parts.length; word++){
+										coupling = coupling + "." + parts[word];
+									}
 								}else if(parents.containsKey(coupled)){
 									// If we lack the return type and it's a project class,
 									// and this is not a reference to a class variable
@@ -201,23 +280,6 @@ public class CouplingMapper{
 									String rType = parents.get(coupled);
 									coupling = rType;
 									// Replace coupling with return type
-									for(int word = 2; word < parts.length; word++){
-										coupling = coupling + "." + parts[word];
-									}
-								}else if(parts[1].equals("this")){
-									// References to "this" that get through must be filtered.
-									coupling = coupled;
-									for(int word = 2; word < parts.length; word++){
-										coupling = coupling + "." + parts[word];
-									}
-								}else if(parts[1].equals("class") || parts[1].equals("getClass") || parts[1].equals("getName")){
-									// Filter out .class references
-									coupling = "Class";
-									for(int word = 2; word < parts.length; word++){
-										coupling = coupling + "." + parts[word];
-									}
-								}else if(parts[1].equals("getObject")){
-									coupling = "Object";
 									for(int word = 2; word < parts.length; word++){
 										coupling = coupling + "." + parts[word];
 									}
@@ -234,13 +296,77 @@ public class CouplingMapper{
 
 						coupled = coupling.substring(0, coupling.indexOf("."));
 						System.out.println(coupling);
-						System.out.println("-----------------------------:" + clazz);
 					}else{
 						coupled = coupling;
 					}
 
 					if(classList.contains(coupled)){
-						filteredCoups.add(coupling);
+						// Make sure the method or variable exists.
+						if(coupling.contains(".")){
+							String mName = coupling.substring(coupling.indexOf(".") + 1, coupling.length());
+							boolean found = false;
+
+							if(returnTypes.containsKey(coupling)){
+								// Do we have a return type?
+								filteredCoups.add(coupling);
+								found = true;
+							}else if(variables.containsKey(coupled) && variables.get(coupled).containsKey(mName)){
+								// Is it a variable?
+								filteredCoups.add(coupling);
+								found = true;
+							}else if(mName.equals("this")){
+								// Do we have a "this"?
+								filteredCoups.add(coupled);
+								found = true;
+							}
+						
+							// Is it a variable or method inherited from a parent?
+							if(!found){
+								String pName = coupled;
+								while(parents.containsKey(pName) && !found){
+									System.out.println("--" + parents.get(pName));	
+									if(!classList.contains(parents.get(pName))){
+										found = true;
+										System.out.println("Inherited from non-project parent: " + coupling);
+										break;
+
+									}else{
+										pName = parents.get(pName);	
+										String newCoupling = pName + "." + mName;
+										System.out.println("--" + newCoupling);
+
+
+										if(returnTypes.containsKey(newCoupling)){
+											filteredCoups.add(newCoupling);
+											System.out.println(newCoupling);
+											found = true;
+										}else if(variables.containsKey(pName) && variables.get(pName).containsKey(mName)){
+											filteredCoups.add(newCoupling);
+											found = true;
+											System.out.println(newCoupling);
+										}
+
+										if(parents.containsKey(pName) && parents.get(pName).equals(pName)){
+											break;
+										}
+									}						
+								}
+							}
+
+							// Is it a method automatically derived from Object?
+							if(!found){
+								if(mName.equals("equals") || mName.equals("finalize") || mName.equals("hashCode") || mName.equals("notify") || mName.equals("notifyAll") || mName.equals("toString") || mName.equals("wait") || mName.equals("getClass") || mName.equals("getObject") || mName.equals("clone")){
+									// Do nothing
+									found = true;
+								}
+							}
+
+							if(!found){
+								System.out.println("Not Found: " + coupling);
+							}
+						}else{
+							filteredCoups.add(coupling);
+						}
 					}
 				}
 				coups.put(method, filteredCoups);
@@ -250,6 +376,10 @@ public class CouplingMapper{
 	}
 
 	// Getters and setters
+	public ArrayList<String> getClassList(){
+		return classList;
+	}
+
 	public HashMap<String, HashMap<String, ArrayList<String>>> getCouplings(){
 		return couplings;
 	}

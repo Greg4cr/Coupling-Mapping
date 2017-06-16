@@ -19,7 +19,10 @@ import java.util.Stack;
 
 public class CouplingVisitor extends JavaBaseListener {
 
+	private boolean canCouple;
 	private Stack<String> location;
+	private String outerClass;
+	private ArrayList<String> classes;
 	private HashMap<String, ArrayList<String>> couplings;
 	private HashMap<String, HashMap<String, String>> variables;
 	private HashMap<String, String> returnTypes;
@@ -50,11 +53,22 @@ public class CouplingVisitor extends JavaBaseListener {
 	}
 
 	public CouplingVisitor(){
+		canCouple = true;
+		outerClass = "";
 		location = new Stack<String>();
+		classes = new ArrayList<String>();
 		couplings = new HashMap<String, ArrayList<String>>();
 		variables = new HashMap<String, HashMap<String, String>>();
 		returnTypes = new HashMap<String, String>();
 		parents = new HashMap<String, String>();
+	}
+
+	// Abstract classes cannot be instantiated, so we mark them as "uncouplable"
+	@Override
+	public void enterClassOrInterfaceModifier(JavaParser.ClassOrInterfaceModifierContext ctx){
+		if(ctx.getText().equals("abstract")){
+			canCouple = false;
+		}
 	}
 
 	/* Gets the class name and whether it inherits from any parents
@@ -64,7 +78,17 @@ public class CouplingVisitor extends JavaBaseListener {
         @Override
         public void enterClassDeclaration(JavaParser.ClassDeclarationContext ctx){
 		// The second child is the class name. 
-		location.push(ctx.getChild(1).getText());
+		if(!location.isEmpty()){
+			outerClass = location.peek();
+		}
+
+		String cName = ctx.getChild(1).getText();
+		if(!outerClass.equals("")){
+			cName = outerClass + ":" + cName;
+		}		
+		
+		location.push(cName);
+		classes.add(cName);
 
 		// Check whether the class inherits from a parent
 		for(int child = 0; child < ctx.getChildCount(); child++){
@@ -84,40 +108,92 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
         public void enterEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
 		// The second child is the class name. 
-		location.push(ctx.getChild(1).getText());
+		if(!location.isEmpty()){
+			outerClass = location.peek();
+		}
+
+		String cName = ctx.getChild(1).getText();
+		if(!outerClass.equals("")){
+			cName = outerClass + ":" + cName;
+		}		
+		
+		location.push(cName);
+		classes.add(cName);
 	}
 
 	@Override
         public void enterInterfaceDeclaration(JavaParser.InterfaceDeclarationContext ctx){
+		canCouple = false;
 		// The second child is the class name. 
-		location.push(ctx.getChild(1).getText());
+		if(!location.isEmpty()){
+			outerClass = location.peek();
+		}
+
+		String cName = ctx.getChild(1).getText();
+		if(!outerClass.equals("")){
+			cName = outerClass + ":" + cName;
+		}		
+		
+		location.push(cName);
+		classes.add(cName);
 	}
 
 	@Override
         public void enterAnnotationTypeDeclaration(JavaParser.AnnotationTypeDeclarationContext ctx){
+		canCouple = false;
 		// The third child is the class name. 
-		location.push(ctx.getChild(2).getText());
+		if(!location.isEmpty()){
+			outerClass = location.peek();
+		}
+
+		String cName = ctx.getChild(2).getText();
+		if(!outerClass.equals("")){
+			cName = outerClass + ":" + cName;
+		}		
+		
+		location.push(cName);
+		classes.add(cName);
 	}
 
 	// Reset class name on exit.
 	@Override
 	public void exitClassDeclaration(JavaParser.ClassDeclarationContext ctx){
 		location.pop();
+		if(outerClass.contains(":")){
+			outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
+		}else{
+			outerClass = "";
+		}
 	}
 
 	@Override
 	public void exitEnumDeclaration(JavaParser.EnumDeclarationContext ctx){
 		location.pop();
+		if(outerClass.contains(":")){
+			outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
+		}else{
+			outerClass = "";
+		}
 	}
 
 	@Override
 	public void exitInterfaceDeclaration(JavaParser.InterfaceDeclarationContext ctx){
 		location.pop();
+		if(outerClass.contains(":")){
+			outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
+		}else{
+			outerClass = "";
+		}
 	}
 
 	@Override
 	public void exitAnnotationTypeDeclaration(JavaParser.AnnotationTypeDeclarationContext ctx){
 		location.pop();
+		if(outerClass.contains(":")){
+			outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
+		}else{
+			outerClass = "";
+		}
 	}
 
 	/* Adjusts the current method tracking
@@ -134,6 +210,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 		if(type.contains("[")){
 			type = type.substring(0, type.indexOf("["));
+		}
+
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
 		}
 
 		if(returnTypes.containsKey(location.peek())){
@@ -201,6 +286,16 @@ public class CouplingVisitor extends JavaBaseListener {
 		if(type.contains("[")){
 			type = type.substring(0, type.indexOf("["));
 		}
+	
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-1).getText();
 		if(name.contains("[")){
@@ -232,6 +327,15 @@ public class CouplingVisitor extends JavaBaseListener {
 			type = type.substring(0, type.indexOf("["));
 		}
 
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-1).getText();
 		if(name.contains("[")){
@@ -259,6 +363,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 		if(type.contains("[")){
 			type = type.substring(0, type.indexOf("["));
+		}
+
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
 		}
 
 		// Variable name
@@ -295,6 +408,14 @@ public class CouplingVisitor extends JavaBaseListener {
 		if(type.contains("[")){
 			type = type.substring(0, type.indexOf("["));
 		}
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
 
 		// Variable name
 		for(int child = 0; child < ctx.getChild(ctx.getChildCount()-1).getChildCount(); child++){
@@ -330,7 +451,14 @@ public class CouplingVisitor extends JavaBaseListener {
 		if(type.contains("[")){
 			type = type.substring(0, type.indexOf("["));
 		}
-
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-3).getText();
 		if(name.contains("[")){
@@ -355,6 +483,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Type and name are two children away from last child
 		// Variable type
 		String type = ctx.getChild(ctx.getChildCount()-4).getText();
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-3).getText();
 		localVars.put(name, type);
@@ -367,6 +504,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Child 2 should be a "." to count
 		if(ctx.getChildCount() > 2){
 			if(ctx.getChild(1).getText().equals(".")){
+				//System.out.println("-------" + location.peek() + "\n--" + ctx.getText());
 				ArrayList<String> deps;
 				if(couplings.containsKey(location.peek())){
 					deps = couplings.get(location.peek());
@@ -456,6 +594,14 @@ public class CouplingVisitor extends JavaBaseListener {
 						found = true;
 					}
 				}
+				
+				// Check for Java globally available methods
+				if(!found){
+					if(var.equals("getType") || var.equals("getClass")){
+						var = "Class";
+						found = true;
+					}
+				}
 				//Check globals
 				if(!found){
 					if(variables.containsKey(location.peek())){
@@ -528,7 +674,7 @@ public class CouplingVisitor extends JavaBaseListener {
 					}
 				} 
 							
-				// Finally, if it is actually a "new" declaration
+				// It could actually a "new" declaration
 				if(!found && var.contains("new")){
 					if(var.indexOf("new") == 0){
 						var = var.substring(3,var.length());
@@ -536,6 +682,12 @@ public class CouplingVisitor extends JavaBaseListener {
 					}
 				}
 				
+				// If this is a subexpression, it is a primitive
+				if(var.contains("+") || var.contains("-") || var.contains("*") || var.contains("/") || var.contains("&") || var.contains("&") || var.contains("|")){
+					var = "primitive";
+
+					found = true;
+				}
 				
 				// Now put the type in
 				if(found){
@@ -545,6 +697,7 @@ public class CouplingVisitor extends JavaBaseListener {
 						expr = var;
 					}
 				}
+				//System.out.println(expr);
 				deps.add(expr);
 				couplings.put(location.peek(), deps);
 			}
@@ -555,6 +708,36 @@ public class CouplingVisitor extends JavaBaseListener {
 	 * with the return type of that method.
 	 */
 	public void updateCouplings(){
+		// Update return types
+		for(String method: returnTypes.keySet()){
+			String type = returnTypes.get(method);
+			// Is this type an inner class?
+			for(String clazz : classes){
+				if(clazz.contains(":")){
+					if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+						returnTypes.put(method, clazz);
+					}
+				}
+			}
+		}
+		// Update variable types
+		for(String method: variables.keySet()){
+			HashMap<String, String> vars = variables.get(method);
+			for(String variable: vars.keySet()){
+				String type = vars.get(variable);
+				// Is this type an inner class?
+				for(String clazz : classes){
+					if(clazz.contains(":")){
+						if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+							vars.put(variable, clazz);
+						}
+					}
+				}
+			}
+			variables.put(method, vars);
+		}
+
+		// Update couplings
 		for(String method : couplings.keySet()){
 			String clazz = "";
 			if(method.contains(".")){
@@ -576,7 +759,16 @@ public class CouplingVisitor extends JavaBaseListener {
 					var = returnTypes.get(clazz + "." + var);
 					found = true; 
 				}
-				
+
+				// Is this type an inner class?
+				for(String cl : classes){
+					if(cl.contains(":")){
+						if(var.equals(cl.substring(cl.lastIndexOf(":")+1,cl.length()))){
+							var = cl;	
+						}
+					}
+				}
+
 				// Now put the type in
 				if(found){
 					if(deps.get(expr).contains(".")){
@@ -604,6 +796,14 @@ public class CouplingVisitor extends JavaBaseListener {
 		if(type.contains("[")){
 			type = type.substring(0, type.indexOf("["));
 		}
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
 
 		ArrayList<String> deps;
 		if(couplings.containsKey(location.peek())){
@@ -616,8 +816,18 @@ public class CouplingVisitor extends JavaBaseListener {
 		couplings.put(location.peek(), deps);
 		// If there is an anonymous class, we update location
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-			location.push(type);
-			parents.put(location.peek(), location.peek());
+			if(!location.isEmpty()){
+				outerClass = location.peek();
+			}
+
+			String cName = type;
+			if(!outerClass.equals("")){
+				cName = outerClass + ":" + cName;
+			}		
+		
+			location.push(cName);
+			classes.add(cName);
+			parents.put(location.peek(), type);
 		}
 	}
 	
@@ -626,7 +836,13 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Exit inner class
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
 			location.pop();
-			parents.put(location.peek(), location.peek());
+			if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
+				if(outerClass.contains(":")){
+					outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
+				}else{
+					outerClass = "";
+				}
+			}
 		}
 	}
 
@@ -639,22 +855,57 @@ public class CouplingVisitor extends JavaBaseListener {
 		if(type.contains("[")){
 			type = type.substring(0, type.indexOf("["));
 		}
+		// Is this type an inner class?
+		for(String clazz : classes){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
 
 		// If there is an anonymous class, we update location
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-			location.push(type);
-			parents.put(location.peek(), location.peek());
+			if(!location.isEmpty()){
+				outerClass = location.peek();
+			}
+
+			String cName = type;
+			if(!outerClass.equals("")){
+				cName = outerClass + ":" + cName;
+			}		
+		
+			location.push(cName);
+			classes.add(cName);
+			parents.put(location.peek(), type);
 		}	
 	}
 	
 	@Override
 	public void exitInnerCreator(JavaParser.InnerCreatorContext ctx){
-		location.pop();
+		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
+			location.pop();
+			if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
+				if(outerClass.contains(":")){
+					outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
+				}else{
+					outerClass = "";
+				}
+			}
+		}
 	}
 
         // Getters and setters
+	public boolean getCanCouple(){
+		return canCouple;
+	}
+
  	public Stack<String> getLocation(){
 		return location;
+	}
+
+	public ArrayList<String> getClasses(){
+		return classes;
 	}
 
 	public HashMap<String,ArrayList<String>> getCouplings(){
