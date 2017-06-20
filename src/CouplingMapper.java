@@ -25,6 +25,8 @@ import java.util.HashSet;
 public class CouplingMapper{
 	// List of classes
 	private ArrayList<String> classList;
+	// List of interfaces and abstract classes
+	private ArrayList<String> unusableClasses;
 	// Couplings between classes
 	private HashMap<String, HashMap<String, ArrayList<String>>> couplings;
 	// Return types of class methods
@@ -36,6 +38,7 @@ public class CouplingMapper{
 
 	public CouplingMapper(){
 		classList = new ArrayList<String>();
+		unusableClasses = new ArrayList<String>();
 		couplings = new HashMap<String, HashMap<String, ArrayList<String>>>();
 		returnTypes = new HashMap<String, String>();
 		parents = new HashMap<String, String>();
@@ -52,10 +55,8 @@ public class CouplingMapper{
 				mapper.generateClassList(args[0]);
 				// Generate couplings for each class
 				mapper.generateCouplings();
-				// Filter couplings to remove non-project classes
+				// Filter couplings to remove non-project classes and simplify nesting
 				mapper.filterCouplings();
-				// Simplify multi-level couplings
-				// Run one more filtering pass to remove non-project classes
 	
 				// CSV of results
 				System.out.println("# Class, Method, Coupling");
@@ -122,23 +123,49 @@ public class CouplingMapper{
 				CouplingVisitor visitor = new CouplingVisitor(); 
 				walker.walk(visitor, tree);
 
-				if(visitor.getCanCouple()){
-					ArrayList<String> classes = visitor.getClasses();
-					HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
-					HashMap<String, String> rTypes = visitor.getReturnTypes();
-					HashMap<String, String> parentList = visitor.getParents();
-					HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
-					couplings.put(file, coups);
+				HashMap<String, Boolean> classes = visitor.getClasses();
+				HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
+				HashMap<String, String> rTypes = visitor.getReturnTypes();
+				HashMap<String, String> parentList = visitor.getParents();
+				HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
 
-					for(String clazz : classes){
+				for(String clazz : classes.keySet()){
+					if(classes.get(clazz)){	
 						if(classList.contains(clazz)){
 							System.out.println("Warning: Multiple Class Definitions: " + clazz);
 						}else{
 							classList.add(clazz);
 						}
+					}else{
+						if(unusableClasses.contains(clazz)){
+							System.out.println("Warning: Multiple Class Definitions: " + clazz);
+						}else{
+							unusableClasses.add(clazz);
+						}
+					}
+				}
+
+				HashMap<String, ArrayList<String>> coupsToAdd = new HashMap<String, ArrayList<String>>();
+				for(String clazz : coups.keySet()){
+					String cl = "";
+					if(clazz.contains(".")){
+						cl = clazz.substring(0, clazz.indexOf("."));
+					}else{
+						cl = clazz;
 					}
 
-					for(String key : rTypes.keySet()){
+					if(classList.contains(cl)){
+						coupsToAdd.put(clazz, coups.get(clazz));
+					}
+				}
+
+				couplings.put(file, coupsToAdd);
+
+
+				for(String key : rTypes.keySet()){
+					String clazz = key.substring(0,key.indexOf("."));
+
+					if(classList.contains(clazz)){
 						if(returnTypes.containsKey(key)){
 							if(!returnTypes.get(key).equals(rTypes.get(key))){
 								System.out.println("Warning: Multiple Method Definitions: " + key + " = {" + returnTypes.get(key) + ", " + rTypes.get(key) + "}");
@@ -146,7 +173,11 @@ public class CouplingMapper{
 						}
 						returnTypes.put(key, rTypes.get(key));
 					}
-					for(String key: parentList.keySet()){
+				}
+
+				for(String key: parentList.keySet()){
+					System.out.println("+" + key + "," + parentList.get(key));
+					if(classList.contains(key) || unusableClasses.contains(key)){
 						if(parents.containsKey(key)){
 							if(!parents.get(key).equals(parentList.get(key))){
 								System.out.println("Warning: Multiple Class Definitions: " + key + ", Conflicting Parents = {" + parents.get(key) + ", " + parentList.get(key) + "}");
@@ -154,12 +185,20 @@ public class CouplingMapper{
 						}
 						parents.put(key, parentList.get(key));	
 					}
+				}
 
-					for(String key: allVars.keySet()){
+				for(String key: allVars.keySet()){
+					String clazz = "";
+					if(key.contains(".")){
+						clazz = key.substring(0, key.indexOf("."));
+					}else{
+						clazz = key;
+					}
+					if(classList.contains(clazz)){
 						if(!key.contains(".")){
 							// Looking only for global variables
 							HashMap<String, String> gVars = allVars.get(key);
-			
+				
 							if(variables.containsKey(key)){
 								HashMap<String, String> eVars = variables.get(key);
 								for(String gv: gVars.keySet()){
@@ -178,6 +217,7 @@ public class CouplingMapper{
 						}
 					}
 				}
+				
 			}catch(IOException e){
 				e.printStackTrace();
 			}
@@ -209,7 +249,7 @@ public class CouplingMapper{
 						String[] parts = coupling.split("\\.");
 						coupled = parts[0];
 						// References to methods of a parent might get through.
-						if(!classList.contains(coupled)){
+						if(!classList.contains(coupled) && Character.isLowerCase(coupled.charAt(0))){
 							String cName = "";
 							if(method.contains(".")){
 								cName = method.substring(0, method.indexOf("."));
@@ -217,15 +257,13 @@ public class CouplingMapper{
 								cName = method;
 							}
 							if(parents.containsKey(cName)){
-								String pName = parents.get(cName);
-								// See if it is defined in the parent
-								if(returnTypes.containsKey(pName + "." + coupled)){
-									coupling = returnTypes.get(pName + "." + coupled);
-									// Replace coupling with return type
-									for(int word = 1; word < parts.length; word++){
-										coupling = coupling + "." + parts[word];
-									}
+								coupling = parents.get(cName) + "." + coupled;
+								// Replace coupling with return type
+								for(int word = 1; word < parts.length; word++){
+									coupling = coupling + "." + parts[word];
 								}
+								
+								parts = coupling.split("\\.");
 							}
 						}
 
@@ -280,7 +318,7 @@ public class CouplingMapper{
 									String rType = parents.get(coupled);
 									coupling = rType;
 									// Replace coupling with return type
-									for(int word = 2; word < parts.length; word++){
+									for(int word = 1; word < parts.length; word++){
 										coupling = coupling + "." + parts[word];
 									}
 								}else{
@@ -326,8 +364,12 @@ public class CouplingMapper{
 								while(parents.containsKey(pName) && !found){
 									System.out.println("--" + parents.get(pName));	
 									if(!classList.contains(parents.get(pName))){
+										if(unusableClasses.contains(parents.get(pName))){
+											System.out.println("Coupled to abstract class or interface: " + coupling);
+										}else{
+											System.out.println("Coupled to non-project parent: " + coupling);
+										}
 										found = true;
-										System.out.println("Inherited from non-project parent: " + coupling);
 										break;
 
 									}else{
@@ -355,7 +397,7 @@ public class CouplingMapper{
 
 							// Is it a method automatically derived from Object?
 							if(!found){
-								if(mName.equals("equals") || mName.equals("finalize") || mName.equals("hashCode") || mName.equals("notify") || mName.equals("notifyAll") || mName.equals("toString") || mName.equals("wait") || mName.equals("getClass") || mName.equals("getObject") || mName.equals("clone")){
+								if(mName.equals("equals") || mName.equals("finalize") || mName.equals("hashCode") || mName.equals("notify") || mName.equals("notifyAll") || mName.equals("toString") || mName.equals("wait") || mName.equals("getClass") || mName.equals("getObject") || mName.equals("clone") || mName.equals("length")){
 									// Do nothing
 									found = true;
 								}
@@ -367,6 +409,10 @@ public class CouplingMapper{
 						}else{
 							filteredCoups.add(coupling);
 						}
+					}else if(unusableClasses.contains(coupled)){
+						System.out.println("Coupled to abstract class or interface: " + coupling);
+					}else{
+						System.out.println("Coupled to non-project class: " + coupling);
 					}
 				}
 				coups.put(method, filteredCoups);
@@ -378,6 +424,10 @@ public class CouplingMapper{
 	// Getters and setters
 	public ArrayList<String> getClassList(){
 		return classList;
+	}
+
+	public ArrayList<String> getUnusableClasses(){
+		return unusableClasses;
 	}
 
 	public HashMap<String, HashMap<String, ArrayList<String>>> getCouplings(){

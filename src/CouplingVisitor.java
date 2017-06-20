@@ -11,6 +11,7 @@ import org.antlr.v4.runtime.ANTLRInputStream;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
+import org.antlr.v4.runtime.tree.TerminalNode;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.util.HashMap;
@@ -19,14 +20,22 @@ import java.util.Stack;
 
 public class CouplingVisitor extends JavaBaseListener {
 
-	private boolean canCouple;
+	// Tracks current program location
 	private Stack<String> location;
 	private String outerClass;
-	private ArrayList<String> classes;
+
+	// List of classes, and whether they can couple (false = interface, abstract class)
+	private HashMap<String, Boolean> classes;
+	boolean canCouple;
+
+	// List of couplings. Indexed by location
 	private HashMap<String, ArrayList<String>> couplings;
+
+	// List of program variables, method return types, and class parents
 	private HashMap<String, HashMap<String, String>> variables;
 	private HashMap<String, String> returnTypes;
 	private HashMap<String, String> parents;
+	private ArrayList<String> importedSubclasses;
 
 	public static void main(String[] args){
 		try{
@@ -53,15 +62,46 @@ public class CouplingVisitor extends JavaBaseListener {
 	}
 
 	public CouplingVisitor(){
-		canCouple = true;
 		outerClass = "";
+		canCouple = true;
 		location = new Stack<String>();
-		classes = new ArrayList<String>();
+		classes = new HashMap<String, Boolean>();
 		couplings = new HashMap<String, ArrayList<String>>();
 		variables = new HashMap<String, HashMap<String, String>>();
 		returnTypes = new HashMap<String, String>();
 		parents = new HashMap<String, String>();
+		importedSubclasses = new ArrayList<String>();
 	}
+
+	/* Import statements can help qualify subclasses imported from within the project.
+	 * importDeclaration :   'import' 'static'? qualifiedName ('.' '*')? ';'
+	 */
+	@Override
+	public void enterImportDeclaration(JavaParser.ImportDeclarationContext ctx){
+		// The import name will be either child 2 or 3
+		String iName = "";
+		if(ctx.getChild(1).getText().equals("static")){
+			iName = ctx.getChild(2).getText();
+		}else{
+			iName = ctx.getChild(1).getText();
+		}
+
+		String iClass = "";
+		String[] parts = iName.split("\\.");
+		for(int part = 0; part < parts.length; part++){
+			// Is the first letter uppercase?
+			if(Character.isUpperCase(parts[part].charAt(0))){
+				iClass = iClass + parts[part] + ":";
+			}
+		}
+		if(iClass.contains(":")){
+			iClass = iClass.substring(0, iClass.length() - 1);
+			if(iClass.contains(":")){
+				importedSubclasses.add(iClass);
+			}
+		}
+	}
+
 
 	// Abstract classes cannot be instantiated, so we mark them as "uncouplable"
 	@Override
@@ -88,7 +128,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		}		
 		
 		location.push(cName);
-		classes.add(cName);
+		classes.put(cName, canCouple);
 
 		// Check whether the class inherits from a parent
 		for(int child = 0; child < ctx.getChildCount(); child++){
@@ -98,6 +138,23 @@ public class CouplingVisitor extends JavaBaseListener {
 					// Strip out specific instantiation. Just need base class name
 					parent = parent.substring(0,parent.indexOf("<"));
 				}
+				// Is this type an inner class?
+				for(String clazz : classes.keySet()){
+					if(clazz.contains(":")){
+						if(parent.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+							parent = clazz;
+						}
+					}
+				}
+				// Is this type an imported subclass?
+				for(String clazz : importedSubclasses){
+					if(clazz.contains(":")){
+						if(parent.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+							parent = clazz;
+						}
+					}
+				}
+
 				parents.put(location.peek(),parent);
 				break;
 			}
@@ -118,7 +175,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		}		
 		
 		location.push(cName);
-		classes.add(cName);
+		classes.put(cName, canCouple);
 	}
 
 	@Override
@@ -135,7 +192,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		}		
 		
 		location.push(cName);
-		classes.add(cName);
+		classes.put(cName, canCouple);
 	}
 
 	@Override
@@ -152,7 +209,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		}		
 		
 		location.push(cName);
-		classes.add(cName);
+		classes.put(cName, canCouple);
 	}
 
 	// Reset class name on exit.
@@ -164,6 +221,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		}else{
 			outerClass = "";
 		}
+		canCouple = true;
 	}
 
 	@Override
@@ -174,6 +232,8 @@ public class CouplingVisitor extends JavaBaseListener {
 		}else{
 			outerClass = "";
 		}
+
+		canCouple = true;
 	}
 
 	@Override
@@ -184,6 +244,8 @@ public class CouplingVisitor extends JavaBaseListener {
 		}else{
 			outerClass = "";
 		}
+		
+		canCouple = true;
 	}
 
 	@Override
@@ -194,6 +256,8 @@ public class CouplingVisitor extends JavaBaseListener {
 		}else{
 			outerClass = "";
 		}
+
+		canCouple = true;
 	}
 
 	/* Adjusts the current method tracking
@@ -213,7 +277,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -266,6 +338,33 @@ public class CouplingVisitor extends JavaBaseListener {
 		location.pop();
 	}
 
+	/* Adds enum values to variable list
+	* enumConstant:   annotation* Identifier arguments? classBody?
+	*/
+	@Override
+	public void enterEnumConstant(JavaParser.EnumConstantContext ctx){
+		for(int child = 0; child < ctx.getChildCount(); child ++){
+			if(ctx.getChild(child) instanceof TerminalNode){
+				HashMap<String, String> localVars;
+				if(variables.containsKey(location.peek())){
+					localVars = variables.get(location.peek());
+				}else{
+					localVars = new HashMap<String, String>();
+				}
+				// Variable type
+				String type = location.peek();
+	
+				// Variable name
+				String name = ctx.getChild(child).getText();
+				if(name.contains("(")){
+					name = name.substring(0, name.indexOf("("));
+				}
+				localVars.put(name, type);
+				variables.put(location.peek(), localVars);
+			}
+		}
+	}
+
 	/* Adds parameters to variable list
 	* formalParameter :   variableModifier* typeType variableDeclaratorId
 	*/
@@ -288,7 +387,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 	
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -328,7 +435,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -366,7 +481,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -409,7 +532,15 @@ public class CouplingVisitor extends JavaBaseListener {
 			type = type.substring(0, type.indexOf("["));
 		}
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -452,13 +583,22 @@ public class CouplingVisitor extends JavaBaseListener {
 			type = type.substring(0, type.indexOf("["));
 		}
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
 				}
 			}
 		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-3).getText();
 		if(name.contains("[")){
@@ -484,7 +624,15 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Variable type
 		String type = ctx.getChild(ctx.getChildCount()-4).getText();
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -712,7 +860,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		for(String method: returnTypes.keySet()){
 			String type = returnTypes.get(method);
 			// Is this type an inner class?
-			for(String clazz : classes){
+			for(String clazz : classes.keySet()){
 				if(clazz.contains(":")){
 					if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 						returnTypes.put(method, clazz);
@@ -726,7 +874,7 @@ public class CouplingVisitor extends JavaBaseListener {
 			for(String variable: vars.keySet()){
 				String type = vars.get(variable);
 				// Is this type an inner class?
-				for(String clazz : classes){
+				for(String clazz : classes.keySet()){
 					if(clazz.contains(":")){
 						if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 							vars.put(variable, clazz);
@@ -750,6 +898,7 @@ public class CouplingVisitor extends JavaBaseListener {
 			for(int expr=0; expr < deps.size(); expr++){
 				// Find type of referenced variable
 				String var = deps.get(expr);
+
 				if(var.contains(".")){
 					var = var.substring(0,var.indexOf("."));
 				}
@@ -761,12 +910,23 @@ public class CouplingVisitor extends JavaBaseListener {
 				}
 
 				// Is this type an inner class?
-				for(String cl : classes){
+				for(String cl : classes.keySet()){
 					if(cl.contains(":")){
 						if(var.equals(cl.substring(cl.lastIndexOf(":")+1,cl.length()))){
 							var = cl;	
+							found = true;
 						}
 					}
+				}
+
+				// Is this actually an imported subclass?
+				for(String cl: importedSubclasses){
+					if(cl.contains(":")){
+						if(var.equals(cl.substring(cl.lastIndexOf(":")+1,cl.length()))){
+							var = cl;	
+							found = true;
+						}
+					}				
 				}
 
 				// Now put the type in
@@ -797,7 +957,15 @@ public class CouplingVisitor extends JavaBaseListener {
 			type = type.substring(0, type.indexOf("["));
 		}
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -816,17 +984,10 @@ public class CouplingVisitor extends JavaBaseListener {
 		couplings.put(location.peek(), deps);
 		// If there is an anonymous class, we update location
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-			if(!location.isEmpty()){
-				outerClass = location.peek();
-			}
-
-			String cName = type;
-			if(!outerClass.equals("")){
-				cName = outerClass + ":" + cName;
-			}		
-		
+			String cName = outerClass + ":" + type;
+				
 			location.push(cName);
-			classes.add(cName);
+			classes.put(cName, canCouple);
 			parents.put(location.peek(), type);
 		}
 	}
@@ -836,13 +997,6 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Exit inner class
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
 			location.pop();
-			if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-				if(outerClass.contains(":")){
-					outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
-				}else{
-					outerClass = "";
-				}
-			}
 		}
 	}
 
@@ -856,7 +1010,15 @@ public class CouplingVisitor extends JavaBaseListener {
 			type = type.substring(0, type.indexOf("["));
 		}
 		// Is this type an inner class?
-		for(String clazz : classes){
+		for(String clazz : classes.keySet()){
+			if(clazz.contains(":")){
+				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
+					type = clazz;
+				}
+			}
+		}
+		// Is this type an imported subclass?
+		for(String clazz : importedSubclasses){
 			if(clazz.contains(":")){
 				if(type.equals(clazz.substring(clazz.lastIndexOf(":")+1,clazz.length()))){
 					type = clazz;
@@ -866,17 +1028,10 @@ public class CouplingVisitor extends JavaBaseListener {
 
 		// If there is an anonymous class, we update location
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-			if(!location.isEmpty()){
-				outerClass = location.peek();
-			}
-
-			String cName = type;
-			if(!outerClass.equals("")){
-				cName = outerClass + ":" + cName;
-			}		
-		
+			String cName = outerClass + ":" + type;
+				
 			location.push(cName);
-			classes.add(cName);
+			classes.put(cName, canCouple);
 			parents.put(location.peek(), type);
 		}	
 	}
@@ -885,13 +1040,6 @@ public class CouplingVisitor extends JavaBaseListener {
 	public void exitInnerCreator(JavaParser.InnerCreatorContext ctx){
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
 			location.pop();
-			if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-				if(outerClass.contains(":")){
-					outerClass = outerClass.substring(0,outerClass.lastIndexOf(":"));
-				}else{
-					outerClass = "";
-				}
-			}
 		}
 	}
 
@@ -904,23 +1052,30 @@ public class CouplingVisitor extends JavaBaseListener {
 		return location;
 	}
 
-	public ArrayList<String> getClasses(){
+	public HashMap<String, Boolean> getClasses(){
 		return classes;
 	}
 
 	public HashMap<String,ArrayList<String>> getCouplings(){
+		updateCouplings();
 		return couplings;
 	}
 
 	public HashMap<String, HashMap<String, String>> getVariables(){
+		updateCouplings();
 		return variables;
 	}
 
 	public HashMap<String, String> getReturnTypes(){
+		updateCouplings();
 		return returnTypes;
 	}
 	
 	public HashMap<String, String> getParents(){
 		return parents;
+	}
+
+	public ArrayList<String> getImportedSubclasses(){
+		return importedSubclasses;
 	}
 }
