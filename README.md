@@ -13,9 +13,9 @@ Use
 
 The project can be compiled using the provided ant file (target "ant compile"). First, run target "ant antlr" to generate Java code required for parsing. 
 
-Class CouplingMapper is the main entry point. It generates a CSV file of couplings (Class.method -> Class.variable/method) for all Java classes in a project. It takes one argument - a path to the directory where Java files are contained. It recursively searches all subdirectories for Java files.
+Class CouplingMapper is the main entry point. It generates a CSV file of couplings (Class.method -> Class.variable/method) for all Java classes in a project and a graph of the project. It takes one required argument - a path to the directory where Java files are contained - and one optional argument - a path of a file listing target classes). It recursively searches all subdirectories for Java files.
 
-    java -cp ".:lib/antlr-4.5.3-complete.jar" CouplingMapper /path/to/dir/
+    java -cp ".:lib/antlr-4.5.3-complete.jar" CouplingMapper /path/to/dir/ (optional: /path/to/list/of/target/classes)
 
 The Java class CouplingVisitor generates a CSV file for an individual .Java file of couplings (Class.Method -> Class.variable/method). This is an unfiltered list (layered calls not simplified). CouplingMapper uses this, then filters the results.
 
@@ -25,6 +25,8 @@ Requirements
 Static analysis is performed using the Antlr framework (http://antlr.org). A version of the Antlr jar is distributed in this repository.
 
 This project uses the Java 1.7 grammar file developed by Terrence Parr and Sam Harwell. This file is used as is without any modification and provided as part of this repository.
+
+Graphs are produced using GraphStream (http://graphstream-project.org). Copies of all requires jars are distributed with this project.
 
 Reporting Faults
 ------------------------

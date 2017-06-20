@@ -14,8 +14,14 @@ import org.antlr.v4.runtime.ANTLRInputStream;
 import org.antlr.v4.runtime.CommonTokenStream;
 import org.antlr.v4.runtime.tree.ParseTree;
 import org.antlr.v4.runtime.tree.ParseTreeWalker;
+
+import org.graphstream.graph.*;
+import org.graphstream.graph.implementations.*;
+
+import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileInputStream;
+import java.io.FileReader;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.ArrayList;
@@ -46,7 +52,7 @@ public class CouplingMapper{
 	}
 
 	public static void main(String[] args) throws IllegalArgumentException{
-		if(args.length != 1){
+		if(args.length > 2){
 			throw new IllegalArgumentException("Incorrect number of arguments: "+args.length);
 		}else{
 			CouplingMapper mapper = new CouplingMapper();
@@ -58,21 +64,114 @@ public class CouplingMapper{
 				// Filter couplings to remove non-project classes and simplify nesting
 				mapper.filterCouplings();
 	
-				// CSV of results
-				System.out.println("# Class, Method, Coupling");
-				for(String clazz : mapper.getCouplings().keySet()){ 
-					HashMap<String, ArrayList<String>> coups = mapper.getCouplings().get(clazz);
-					for(String method : coups.keySet()){
-						for(String var : coups.get(method)){
-							System.out.println(clazz + "," + method + "," + var);
-						}
+				// Generate CSV of results 
+				mapper.generateCSV();
+
+				// Argument 2 (optional) is a list of faulty classes
+				ArrayList<String> targets = new ArrayList<String>();
+				if(args.length > 1){
+					BufferedReader reader = new BufferedReader(new FileReader(args[1]));	
+					String current = "";
+					while((current = reader.readLine()) != null){
+						targets.add(current);
 					}
 				}
 
+				// Generate graph
+				mapper.generateGraph(targets);
+			
 			}catch(IOException e){
 				e.printStackTrace();
 			}
 		}	
+	}
+
+	// Generate CSV of results
+	public void generateCSV(){
+		System.out.println("# Class, Method, Coupling");
+		for(String clazz : couplings.keySet()){ 
+			HashMap<String, ArrayList<String>> coups = couplings.get(clazz);
+			for(String method : coups.keySet()){
+				for(String var : coups.get(method)){
+					System.out.println(clazz + "," + method + "," + var);
+				}
+			}
+		}
+	}
+
+	// Generate graph
+	public void generateGraph(ArrayList<String> targets){
+		System.setProperty("org.graphstream.ui.renderer", "org.graphstream.ui.j2dviewer.J2DGraphRenderer");
+		Graph graph = new MultiGraph("couplings");
+		// Define custom coloring for graph
+		graph.addAttribute("ui.stylesheet", "node { text-background-mode: rounded-box; text-alignment: under; }" +
+			"node.target { fill-color: red; }" +
+			"edge { shape: line; fill-color: #222; arrow-size: 3px, 2px;}" +
+			"edge.high { stroke-color: red; stroke-width: 1px; stroke-mode: plain; }" +
+			"edge.medium { stroke-color: yellow; stroke-width: 1px; stroke-mode: plain; }" +
+			"edge.low { stroke-color: blue; stroke-width: 1px; stroke-mode: plain; }"
+		);
+		graph.addAttribute("ui.quality");
+		graph.addAttribute("ui.antialias");
+
+		// Add all classes as nodes
+		for(String clazz: classList){
+			graph.addNode(clazz);
+			graph.getNode(clazz).addAttribute("ui.label", clazz);
+			if(targets.contains(clazz)){
+				graph.getNode(clazz).addAttribute("ui.class", "target");
+			}
+		}
+
+		for(String clazz : couplings.keySet()){ 
+			HashMap<String, ArrayList<String>> coups = couplings.get(clazz);
+			for(String method : coups.keySet()){
+				for(String var : coups.get(method)){
+					// Get class that is coupled to another
+					String source = "";
+					if(method.contains(".")){
+						source = method.substring(0, method.indexOf("."));
+					}else{
+						source = method;
+					}
+
+					// Get class that is the target
+					String sink = "";
+					if(var.contains(".")){
+						sink = var.substring(0, var.indexOf("."));
+					}else{
+						sink = var;
+					}
+			
+					// Do not add self-edges (to keep graph clean)
+					if(!source.equals(sink)){
+						// Edge name
+						String eName = source + "-" + sink;
+	
+						// Add edge if it does not exist
+						if(graph.getEdge(eName) == null){
+							graph.addEdge(eName, source, sink, true);
+							// Set weight
+							graph.getEdge(eName).setAttribute("weight", 1.0);
+						}else{
+							graph.getEdge(eName).setAttribute("weight", graph.getEdge(eName).getNumber("weight") + 1);
+						}
+					}
+				}
+			}
+		}
+		// Color edges by degree of coupling
+		for(Edge edge: graph.getEachEdge()){
+			double weight = edge.getNumber("weight");
+			if(weight <= 5){
+				edge.addAttribute("ui.class", "low");
+			}else if(weight <= 10){
+				edge.addAttribute("ui.class", "medium");
+			}else{
+				edge.addAttribute("ui.class", "high");
+			}
+		}
+		graph.display();
 	}
 
 	// Generates a list of Java files from a directory
@@ -176,7 +275,6 @@ public class CouplingMapper{
 				}
 
 				for(String key: parentList.keySet()){
-					System.out.println("+" + key + "," + parentList.get(key));
 					if(classList.contains(key) || unusableClasses.contains(key)){
 						if(parents.containsKey(key)){
 							if(!parents.get(key).equals(parentList.get(key))){

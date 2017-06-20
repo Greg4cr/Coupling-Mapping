@@ -652,7 +652,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Child 2 should be a "." to count
 		if(ctx.getChildCount() > 2){
 			if(ctx.getChild(1).getText().equals(".")){
-				//System.out.println("-------" + location.peek() + "\n--" + ctx.getText());
+				System.out.println("-------" + location.peek() + "\n--" + ctx.getText());
 				ArrayList<String> deps;
 				if(couplings.containsKey(location.peek())){
 					deps = couplings.get(location.peek());
@@ -845,7 +845,7 @@ public class CouplingVisitor extends JavaBaseListener {
 						expr = var;
 					}
 				}
-				//System.out.println(expr);
+				System.out.println(expr);
 				deps.add(expr);
 				couplings.put(location.peek(), deps);
 			}
@@ -984,7 +984,11 @@ public class CouplingVisitor extends JavaBaseListener {
 		couplings.put(location.peek(), deps);
 		// If there is an anonymous class, we update location
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-			String cName = outerClass + ":" + type;
+			String currentClass = location.peek();
+			if(currentClass.contains(".")){
+				currentClass = currentClass.substring(0, currentClass.indexOf("."));
+			}
+			String cName = currentClass + ":" + type;
 				
 			location.push(cName);
 			classes.put(cName, canCouple);
@@ -1028,7 +1032,11 @@ public class CouplingVisitor extends JavaBaseListener {
 
 		// If there is an anonymous class, we update location
 		if(ctx.getChild(ctx.getChildCount()-1).getChildCount() == 2){
-			String cName = outerClass + ":" + type;
+			String currentClass = location.peek();
+			if(currentClass.contains(".")){
+				currentClass = currentClass.substring(0, currentClass.indexOf("."));
+			}
+			String cName = currentClass + ":" + type;
 				
 			location.push(cName);
 			classes.put(cName, canCouple);
