@@ -669,24 +669,62 @@ public class CouplingVisitor extends JavaBaseListener {
 				expr = expr.replaceAll("\\\'.*?\\\'","char");
 			
 				if(expr.contains("(")){
-					// Remove arguments
-											
-					// First portion might contain a cast. 
-					// Need to distinguish cast from arguments.
-					// If first character is "(", then cast.
+					/* We want to remove arguments
+					 * Parentheses are part of arguments, casts, and subexpressions
+					 * Given our restrictions on the types of expressions considered 
+ 					 * at this stage, parentheses can only come through in certain forms.
+					 */
+						
 					if(expr.indexOf("(")==0){
-						String first = expr.substring(0, expr.indexOf("."));
-						String rest = expr.substring(expr.indexOf("."), expr.length());
-						String castType = "";
-						String[] parts = first.split("[(]");
-						for(int word = 0; word < parts.length; word++){
-							if(!parts[word].equals("")){
-								castType = parts[word].substring(0,parts[word].indexOf(")"));
-								break;
+						// Split into substrings based on "."
+						String[] parts = expr.split("[.]");
+						String first = "";
+						String rest = "";
+						boolean balanced = false;
+						int parens = 0;
+
+						for(int part = 0; part < parts.length; part++){
+							if(balanced){
+								if(part < parts.length - 1){
+									rest = rest + parts[part] + ".";
+								}else{
+									rest = rest + parts[part];
+								}
+							}else{
+								for(char letter: parts[part].toCharArray()){
+									if(letter == '('){
+										parens++;
+									}else if(letter == ')'){
+										parens--;
+									}
+								}
+
+								if(parens == 0){
+									balanced = true;
+								}
+								first = first + parts[part] + ".";						
 							}
 						}
-						first = castType;
-						expr = first + rest;
+						first = first.substring(0, first.length() - 1);
+
+						// Now drop parens if this is a grouping
+						if(first.charAt(first.length()-1) == ')'){
+							first = first.substring(1, first.length() - 1);
+						}
+	
+						// Now, if this is a cast, replace with type
+						if(first.charAt(0) == '('){
+							String castType = "";
+							parts = first.split("[(]");
+							for(int word = 0; word < parts.length; word++){
+								if(!parts[word].equals("")){
+									castType = parts[word].substring(0,parts[word].indexOf(")"));
+									break;
+								}
+							}
+							first = castType;
+						}
+						expr = first + "." + rest;
 					}
 					
 					int include = 0;
