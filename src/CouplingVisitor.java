@@ -24,7 +24,7 @@ public class CouplingVisitor extends JavaBaseListener {
 	private Stack<String> location;
 	private String outerClass;
 
-	// List of classes, and whether they can couple (false = interface, abstract class)
+	// List of classes, and whether they can couple (false = interface)
 	private HashMap<String, Boolean> classes;
 	boolean canCouple;
 
@@ -103,6 +103,7 @@ public class CouplingVisitor extends JavaBaseListener {
 	}
 
 
+	
 	// Abstract classes cannot be instantiated, so we mark them as "uncouplable"
 	@Override
 	public void enterClassOrInterfaceModifier(JavaParser.ClassOrInterfaceModifierContext ctx){
@@ -129,15 +130,26 @@ public class CouplingVisitor extends JavaBaseListener {
 		
 		location.push(cName);
 		classes.put(cName, canCouple);
+		// If there is an outer class, add this to the variables list
+		// To capture references such as X.Class.value
+		if(!outerClass.equals("")){
+			HashMap<String, String> localVars;
+			if(variables.containsKey(outerClass)){
+				localVars = variables.get(outerClass);
+			}else{
+				localVars = new HashMap<String, String>();
+			}
+			localVars.put(ctx.getChild(1).getText(), cName);
+			variables.put(outerClass, localVars);
+		}
 
 		// Check whether the class inherits from a parent
 		for(int child = 0; child < ctx.getChildCount(); child++){
 			if(ctx.getChild(child).getText().equals("extends")){
 				String parent = ctx.getChild(child+1).getText();
-				if(parent.contains("<")){
-					// Strip out specific instantiation. Just need base class name
-					parent = parent.substring(0,parent.indexOf("<"));
-				}
+				// Remove generics
+				parent = parent.replaceAll("<.*?>","");
+
 				// Is this type an inner class?
 				for(String clazz : classes.keySet()){
 					if(clazz.contains(":")){
@@ -176,6 +188,18 @@ public class CouplingVisitor extends JavaBaseListener {
 		
 		location.push(cName);
 		classes.put(cName, canCouple);
+		// If there is an outer class, add this to the variables list
+		// To capture references such as X.Class.value
+		if(!outerClass.equals("")){
+			HashMap<String, String> localVars;
+			if(variables.containsKey(outerClass)){
+				localVars = variables.get(outerClass);
+			}else{
+				localVars = new HashMap<String, String>();
+			}
+			localVars.put(ctx.getChild(1).getText(), cName);
+			variables.put(outerClass, localVars);
+		}	
 	}
 
 	@Override
@@ -193,6 +217,18 @@ public class CouplingVisitor extends JavaBaseListener {
 		
 		location.push(cName);
 		classes.put(cName, canCouple);
+		// If there is an outer class, add this to the variables list
+		// To capture references such as X.Class.value
+		if(!outerClass.equals("")){
+			HashMap<String, String> localVars;
+			if(variables.containsKey(outerClass)){
+				localVars = variables.get(outerClass);
+			}else{
+				localVars = new HashMap<String, String>();
+			}
+			localVars.put(ctx.getChild(1).getText(), cName);
+			variables.put(outerClass, localVars);
+		}
 	}
 
 	@Override
@@ -210,6 +246,18 @@ public class CouplingVisitor extends JavaBaseListener {
 		
 		location.push(cName);
 		classes.put(cName, canCouple);
+		// If there is an outer class, add this to the variables list
+		// To capture references such as X.Class.value
+		if(!outerClass.equals("")){
+			HashMap<String, String> localVars;
+			if(variables.containsKey(outerClass)){
+				localVars = variables.get(outerClass);
+			}else{
+				localVars = new HashMap<String, String>();
+			}
+			localVars.put(ctx.getChild(1).getText(), cName);
+			variables.put(outerClass, localVars);
+		}
 	}
 
 	// Reset class name on exit.
@@ -269,11 +317,31 @@ public class CouplingVisitor extends JavaBaseListener {
 		location.push(location.peek() + "." + ctx.getChild(1).getText());
 
 		String type = ctx.getChild(0).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
-		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}	
+			}
+			type = newType.substring(0, newType.length() -1);
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
 
 		// Is this type an inner class?
@@ -293,28 +361,8 @@ public class CouplingVisitor extends JavaBaseListener {
 			}
 		}
 
-		if(returnTypes.containsKey(location.peek())){
-			String existing = returnTypes.get(location.peek());
-			boolean exists = false;
-			if(existing.contains(",")){
-				String[] types = existing.split(",");
-				for(String eType : types){
-					if(eType.equals(type)){
-						exists = true;
-					}
-				}	
-			}else{
-				if(existing.equals(type)){
-					exists = true;
-				}
-			}
-			if(!exists){
-				type = type + "," + returnTypes.get(location.peek());
-				returnTypes.put(location.peek(), type);
-			}
-		}else{
-			returnTypes.put(location.peek(), type);	
-		}
+		returnTypes.put(location.peek(), type);	
+		
 		// Update couplings to resolve references to static methods.
 		updateCouplings();
 	}
@@ -379,11 +427,31 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Last two children are type and name
 		// Variable type
 		String type = ctx.getChild(ctx.getChildCount()-2).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
-		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}
+			}
+			type = newType.substring(0, newType.length() -1);
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
 	
 		// Is this type an inner class?
@@ -405,9 +473,7 @@ public class CouplingVisitor extends JavaBaseListener {
 
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-1).getText();
-		if(name.contains("[")){
-			name = name.substring(0, name.indexOf("["));
-		}
+		name = name.replaceAll("\\[.*?\\]","");
 
 		localVars.put(name, type);
 		variables.put(location.peek(), localVars);
@@ -427,11 +493,31 @@ public class CouplingVisitor extends JavaBaseListener {
 
 		// Variable type
 		String type = ctx.getChild(ctx.getChildCount()-3).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
-		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}
+			}
+			type = newType.substring(0, newType.length() -1);
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
 
 		// Is this type an inner class?
@@ -453,9 +539,8 @@ public class CouplingVisitor extends JavaBaseListener {
 
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-1).getText();
-		if(name.contains("[")){
-			name = name.substring(0, name.indexOf("["));
-		}
+		name = name.replaceAll("\\[.*?\\]","");
+
 		localVars.put(name, type);
 		variables.put(location.peek(), localVars);
 	}
@@ -473,11 +558,31 @@ public class CouplingVisitor extends JavaBaseListener {
 		}
 		// Variable type
 		String type = ctx.getChild(0).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
-		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}
+			}
+			type = newType.substring(0, newType.length() -1);
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
 
 		// Is this type an inner class?
@@ -501,9 +606,8 @@ public class CouplingVisitor extends JavaBaseListener {
 		for(int child = 0; child < ctx.getChild(1).getChildCount(); child++){
 			if(!ctx.getChild(1).getChild(child).getText().equals(",")){
 				String name = ctx.getChild(1).getChild(child).getChild(0).getText();
-				if(name.contains("[")){
-					name = name.substring(0, name.indexOf("["));
-				}
+				name = name.replaceAll("\\[.*?\\]","");
+
 				globalVars.put(name, type);
 				variables.put(location.peek(), globalVars);
 			}
@@ -525,12 +629,33 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Last two children are type and declarators (which gives us names)
 		// Variable type
 		String type = ctx.getChild(ctx.getChildCount()-2).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}
+			}
+			type = newType.substring(0, newType.length() -1);
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
-		}
+
 		// Is this type an inner class?
 		for(String clazz : classes.keySet()){
 			if(clazz.contains(":")){
@@ -552,9 +677,8 @@ public class CouplingVisitor extends JavaBaseListener {
 		for(int child = 0; child < ctx.getChild(ctx.getChildCount()-1).getChildCount(); child++){
 			if(!ctx.getChild(ctx.getChildCount()-1).getChild(child).getText().equals(",")){
 				String name = ctx.getChild(ctx.getChildCount()-1).getChild(child).getChild(0).getText();
-				if(name.contains("[")){
-					name = name.substring(0, name.indexOf("["));
-				}
+				name = name.replaceAll("\\[.*?\\]","");
+
 				localVars.put(name, type);
 				variables.put(location.peek(), localVars);
 			}
@@ -576,12 +700,33 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Type and name are two children away from last child
 		// Variable type
 		String type = ctx.getChild(ctx.getChildCount()-4).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}
+			}
+			type = newType.substring(0, newType.length() -1);
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
-		}
+
 		// Is this type an inner class?
 		for(String clazz : classes.keySet()){
 			if(clazz.contains(":")){
@@ -601,9 +746,8 @@ public class CouplingVisitor extends JavaBaseListener {
 
 		// Variable name
 		String name = ctx.getChild(ctx.getChildCount()-3).getText();
-		if(name.contains("[")){
-			name = name.substring(0, name.indexOf("["));
-		}
+		name = name.replaceAll("\\[.*?\\]","");
+
 		localVars.put(name, type);
 		variables.put(location.peek(), localVars);
 	}
@@ -652,7 +796,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Child 2 should be a "." to count
 		if(ctx.getChildCount() > 2){
 			if(ctx.getChild(1).getText().equals(".")){
-				System.out.println("-------" + location.peek() + "\n--" + ctx.getText());
+				//System.out.println("-------" + location.peek() + "\n--" + ctx.getText());
 				ArrayList<String> deps;
 				if(couplings.containsKey(location.peek())){
 					deps = couplings.get(location.peek());
@@ -676,13 +820,11 @@ public class CouplingVisitor extends JavaBaseListener {
 					 */
 						
 					if(expr.indexOf("(")==0){
-						// Split into substrings based on "."
-						String[] parts = expr.split("[.]");
+						String[] parts = expr.split("[.]"); 
 						String first = "";
 						String rest = "";
 						boolean balanced = false;
 						int parens = 0;
-
 						for(int part = 0; part < parts.length; part++){
 							if(balanced){
 								if(part < parts.length - 1){
@@ -710,6 +852,48 @@ public class CouplingVisitor extends JavaBaseListener {
 						// Now drop parens if this is a grouping
 						if(first.charAt(first.length()-1) == ')'){
 							first = first.substring(1, first.length() - 1);
+						}
+						expr = first + "." + rest;
+						//System.out.println(expr);
+
+						while(expr.charAt(1) == '('){
+							// Split into substrings based on "."
+							parts = expr.split("[.]");
+							first = "";
+							rest = "";
+							balanced = false;
+							parens = 0;
+
+							for(int part = 0; part < parts.length; part++){
+								if(balanced){
+									if(part < parts.length - 1){
+										rest = rest + parts[part] + ".";
+									}else{
+										rest = rest + parts[part];
+									}
+								}else{
+									for(char letter: parts[part].toCharArray()){
+										if(letter == '('){
+											parens++;
+										}else if(letter == ')'){
+											parens--;
+										}
+									}
+
+									if(parens == 0){
+										balanced = true;
+									}
+									first = first + parts[part] + ".";						
+								}
+							}
+							first = first.substring(0, first.length() - 1);
+
+							// Now drop parens if this is a grouping
+							if(first.charAt(first.length()-1) == ')'){
+								first = first.substring(1, first.length() - 1);
+							}
+							expr = first + "." + rest;
+							//System.out.println(expr);
 						}
 	
 						// Now, if this is a cast, replace with type
@@ -883,7 +1067,7 @@ public class CouplingVisitor extends JavaBaseListener {
 						expr = var;
 					}
 				}
-				System.out.println(expr);
+				//System.out.println(expr);
 				deps.add(expr);
 				couplings.put(location.peek(), deps);
 			}
@@ -988,12 +1172,32 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterCreator(JavaParser.CreatorContext ctx){
 		String type = ctx.getChild(ctx.getChildCount()-2).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}
+			}
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
-		}
+
 		// Is this type an inner class?
 		for(String clazz : classes.keySet()){
 			if(clazz.contains(":")){
@@ -1045,12 +1249,33 @@ public class CouplingVisitor extends JavaBaseListener {
 	@Override
 	public void enterInnerCreator(JavaParser.InnerCreatorContext ctx){
 		String type = ctx.getChild(0).getText();
-		if(type.contains("<")){
-			type = type.substring(0, type.indexOf("<"));
+		if(type.contains(".")){
+			String newType = "";
+			String[] parts = type.split("[.]");
+			for(int part = 0; part < parts.length; part++){
+				if(parts[part].contains("<")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("<"));
+				}else if(parts[part].contains(">")){
+					parts[part] = parts[part].substring(parts[part].indexOf(">") + 1, parts[part].length());
+				}
+				if(parts[part].contains("[")){
+					parts[part] = parts[part].substring(0, parts[part].indexOf("["));
+				}
+				if(parts[part].length() > 0 && !Character.isLowerCase(parts[part].charAt(0))){
+					// Gets rid of package names as part of the type name
+					newType = newType + parts[part] + ".";
+				}
+			}
+			type = newType.substring(0, newType.length() -1);
+		}else{
+			if(type.contains("<")){
+				type = type.substring(0, type.indexOf("<"));
+			}
+			if(type.contains("[")){
+				type = type.substring(0, type.indexOf("["));
+			}
 		}
-		if(type.contains("[")){
-			type = type.substring(0, type.indexOf("["));
-		}
+
 		// Is this type an inner class?
 		for(String clazz : classes.keySet()){
 			if(clazz.contains(":")){

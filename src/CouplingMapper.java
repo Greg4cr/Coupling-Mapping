@@ -311,7 +311,7 @@ public class CouplingMapper{
 							}else{
 								variables.put(key, gVars);
 							}
-							//System.out.println(key + ":" + variables.get(key));
+							//System.out.println("+" + key + "-" + variables.get(key));
 						}
 					}
 				}
@@ -335,38 +335,91 @@ public class CouplingMapper{
 				ArrayList<String> mCoups = coups.get(method);
 				ArrayList<String> filteredCoups = new ArrayList<String>(); 
 				for(int index = 0; index < mCoups.size(); index++){
-					System.out.println("-----------------------------:" + clazz);
+					//System.out.println("-----------------------------:" + clazz);
 					// Go over each coupling. These are indexed by class/method.
 					String coupling = mCoups.get(index);
 					String coupled = "";
 
-					System.out.println(coupling);
+					//System.out.println(coupling);
 
 					// If there are 2+ "." characters, we want to simplify
 					if(coupling.contains(".")){
 						String[] parts = coupling.split("\\.");
 						coupled = parts[0];
-						// References to methods of a parent might get through.
-						if(!classList.contains(coupled) && Character.isLowerCase(coupled.charAt(0))){
-							String cName = "";
-							if(method.contains(".")){
-								cName = method.substring(0, method.indexOf("."));
-							}else{
-								cName = method;
-							}
-							if(parents.containsKey(cName)){
-								coupling = parents.get(cName) + "." + coupled;
-								// Replace coupling with return type
-								for(int word = 1; word < parts.length; word++){
-									coupling = coupling + "." + parts[word];
+						// References to methods of a parent and package names might get through.
+						if(!classList.contains(coupled) && !unusableClasses.contains(coupled)){
+							if(!coupled.equals("int") && !coupled.equals("short") && !coupled.equals("long")
+								&& !coupled.equals("char") && !coupled.equals("byte") && !coupled.equals("float")
+								&& !coupled.equals("double") && !coupled.equals("boolean") && !coupled.equals("primitive")){
+	
+								boolean found = false;
+								String cName = "";
+								if(method.contains(".")){
+									cName = method.substring(0, method.indexOf("."));
+								}else{
+									cName = method;
+								}
+								// Is this a package name?
+								
+								if(Character.isLowerCase(coupled.charAt(0))){
+									String rest = "";
+									boolean print = false;
+									for(int word = 1; word < parts.length; word++){
+										if(print){
+											rest = rest + "." + parts[word];
+										}else{
+											if(parts[word].length() > 0 && Character.isUpperCase(parts[word].charAt(0))){
+												print = true;
+												rest = parts[word];
+											}
+										}
+									}
+									if(!rest.equals("")){
+										found = true;
+										coupling = rest;
+										parts = coupling.split("\\.");
+										coupled = parts[0];
+									}
+								}
+
+								// Could this be inherited?
+								if(!found){	
+									if(parents.containsKey(cName) && classList.contains(parents.get(cName))){
+										String potential = parents.get(cName) + "." + coupled;
+										if(returnTypes.containsKey(potential) || 
+											(variables.containsKey(parents.get(cName)) && variables.get(parents.get(cName)).containsKey(coupled)) ||
+											Character.isLowerCase(coupled.charAt(0))){
+											// If this is a variable or method of the parent
+											coupling = potential;
+											// Replace coupling with return type
+											for(int word = 1; word < parts.length; word++){
+												coupling = coupling + "." + parts[word];
+											}
+									
+											parts = coupling.split("\\.");
+											found = true;
+										}
+									}
 								}
 								
-								parts = coupling.split("\\.");
+								// One last try - could be inherited from an abstract parent
+								if(!found){
+									if(parents.containsKey(cName) && unusableClasses.contains(parents.get(cName))){
+										// If this is a variable or method of the parent
+										coupling = parents.get(cName) + "." + coupled;
+										// Replace coupling with return type
+										for(int word = 1; word < parts.length; word++){
+											coupling = coupling + "." + parts[word];
+										}
+								
+										parts = coupling.split("\\.");
+									}
+								}
 							}
 						}
 
 						while(parts.length > 2){
-							System.out.println(coupling);
+							//System.out.println(coupling);
 							// Get initial object
 							coupled = parts[0];	
 							// Is this part of the project?
@@ -422,7 +475,7 @@ public class CouplingMapper{
 								}else{
 									System.out.println("Not Found: " + coupling);
 									break;
-								}
+								}	
 							}else{
 								// If not, go ahead and break out.
 								break;
@@ -430,8 +483,12 @@ public class CouplingMapper{
 							parts = coupling.split("\\.");
 						}
 
-						coupled = coupling.substring(0, coupling.indexOf("."));
-						System.out.println(coupling);
+						if(coupling.contains(".")){
+							coupled = coupling.substring(0, coupling.indexOf("."));
+						}else{
+							coupled = coupling;
+						}
+						//System.out.println(coupling);
 					}else{
 						coupled = coupling;
 					}
@@ -460,10 +517,10 @@ public class CouplingMapper{
 							if(!found){
 								String pName = coupled;
 								while(parents.containsKey(pName) && !found){
-									System.out.println("--" + parents.get(pName));	
+									//System.out.println("--" + parents.get(pName));	
 									if(!classList.contains(parents.get(pName))){
 										if(unusableClasses.contains(parents.get(pName))){
-											System.out.println("Coupled to abstract class or interface: " + coupling);
+											System.out.println("Coupled to interface or abstract class: " + coupling);
 										}else{
 											System.out.println("Coupled to non-project parent: " + coupling);
 										}
@@ -473,17 +530,17 @@ public class CouplingMapper{
 									}else{
 										pName = parents.get(pName);	
 										String newCoupling = pName + "." + mName;
-										System.out.println("--" + newCoupling);
+										//System.out.println("--" + newCoupling);
 
 
 										if(returnTypes.containsKey(newCoupling)){
 											filteredCoups.add(newCoupling);
-											System.out.println(newCoupling);
+											//System.out.println(newCoupling);
 											found = true;
 										}else if(variables.containsKey(pName) && variables.get(pName).containsKey(mName)){
 											filteredCoups.add(newCoupling);
 											found = true;
-											System.out.println(newCoupling);
+											//System.out.println(newCoupling);
 										}
 
 										if(parents.containsKey(pName) && parents.get(pName).equals(pName)){
