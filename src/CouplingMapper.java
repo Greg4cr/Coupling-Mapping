@@ -19,9 +19,11 @@ import org.graphstream.graph.*;
 import org.graphstream.graph.implementations.*;
 
 import java.io.BufferedReader;
+import java.io.BufferedWriter;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileReader;
+import java.io.FileWriter;
 import java.io.IOException;
 import java.util.HashMap;
 import java.util.ArrayList;
@@ -41,6 +43,8 @@ public class CouplingMapper{
 	private HashMap<String, String> parents;
 	// Global variables (names/types) for each class
 	private HashMap<String, HashMap<String, String>> variables;
+	// Project name
+	private String project;
 
 	public CouplingMapper(){
 		classList = new ArrayList<String>();
@@ -49,14 +53,19 @@ public class CouplingMapper{
 		returnTypes = new HashMap<String, String>();
 		parents = new HashMap<String, String>();
 		variables = new HashMap<String, HashMap<String, String>>();
+		project = "results";
 	}
 
 	public static void main(String[] args) throws IllegalArgumentException{
-		if(args.length > 2){
+		if(args.length > 3){
 			throw new IllegalArgumentException("Incorrect number of arguments: "+args.length);
 		}else{
 			CouplingMapper mapper = new CouplingMapper();
 			try{
+				// Second argument (optional) is a project name
+				if(args.length > 1 && !args[1].equals("")){
+					mapper.setProject(args[1]);
+				}
 				// Produce list of Java classes.
 				mapper.generateClassList(args[0]);
 				// Generate couplings for each class
@@ -67,10 +76,10 @@ public class CouplingMapper{
 				// Generate CSV of results 
 				mapper.generateCSV();
 
-				// Argument 2 (optional) is a list of faulty classes
+				// Argument 3 (optional) is a list of faulty classes
 				ArrayList<String> targets = new ArrayList<String>();
-				if(args.length > 1){
-					BufferedReader reader = new BufferedReader(new FileReader(args[1]));	
+				if(args.length == 3){
+					BufferedReader reader = new BufferedReader(new FileReader(args[2]));	
 					String current = "";
 					while((current = reader.readLine()) != null){
 						targets.add(current);
@@ -87,16 +96,18 @@ public class CouplingMapper{
 	}
 
 	// Generate CSV of results
-	public void generateCSV(){
-		System.out.println("# Class, Method, Coupling");
+	public void generateCSV() throws IOException{
+		BufferedWriter writer = new BufferedWriter(new FileWriter(project + ".csv"));	
+		writer.write("# Class, Method, Coupling\n");
 		for(String clazz : couplings.keySet()){ 
 			HashMap<String, ArrayList<String>> coups = couplings.get(clazz);
 			for(String method : coups.keySet()){
 				for(String var : coups.get(method)){
-					System.out.println(clazz + "," + method + "," + var);
+					writer.write(clazz + "," + method + "," + var + "\n");
 				}
 			}
 		}
+		writer.close();
 	}
 
 	// Generate graph
@@ -104,12 +115,13 @@ public class CouplingMapper{
 		System.setProperty("org.graphstream.ui.renderer", "org.graphstream.ui.j2dviewer.J2DGraphRenderer");
 		Graph graph = new MultiGraph("couplings");
 		// Define custom coloring for graph
-		graph.addAttribute("ui.stylesheet", "node { text-background-mode: rounded-box; text-alignment: under; }" +
+		graph.addAttribute("ui.stylesheet", "graph { fill-color: white; }" +
+			"node { fill-color: black; text-background-mode: rounded-box; text-alignment: under; text-offset: 0, 5;}" +
 			"node.target { fill-color: red; }" +
-			"edge { shape: line; fill-color: #222; arrow-size: 3px, 2px;}" +
-			"edge.high { stroke-color: red; stroke-width: 1px; stroke-mode: plain; }" +
-			"edge.medium { stroke-color: yellow; stroke-width: 1px; stroke-mode: plain; }" +
-			"edge.low { stroke-color: blue; stroke-width: 1px; stroke-mode: plain; }"
+			"edge { shape: line; fill-color: #222; arrow-size: 5px, 4px;}" +
+			"edge.high { fill-color: red; }" +
+			"edge.medium { fill-color: orange; }" +
+			"edge.low { fill-color: blue; }"
 		);
 		graph.addAttribute("ui.quality");
 		graph.addAttribute("ui.antialias");
@@ -171,7 +183,9 @@ public class CouplingMapper{
 				edge.addAttribute("ui.class", "high");
 			}
 		}
-		graph.display();
+		
+		graph.display();	
+		//graph.addAttribute("ui.screenshot", project + ".png");	
 	}
 
 	// Generates a list of Java files from a directory
@@ -210,116 +224,113 @@ public class CouplingMapper{
 	}
 
 	// Gather couplings for each class. 
-	public void generateCouplings(){
+	public void generateCouplings() throws IOException{
+		BufferedWriter writer = new BufferedWriter(new FileWriter(project + ".log"));
 		for(String file : couplings.keySet()){
-			try{
-				ANTLRInputStream input = new ANTLRInputStream(new FileInputStream(file));
-				JavaLexer lexer = new JavaLexer(input);
-				CommonTokenStream tokens = new CommonTokenStream(lexer);
-				JavaParser parser = new JavaParser(tokens);
-				ParseTree tree = parser.compilationUnit(); 
-				ParseTreeWalker walker = new ParseTreeWalker();		
-				CouplingVisitor visitor = new CouplingVisitor(); 
-				walker.walk(visitor, tree);
+			ANTLRInputStream input = new ANTLRInputStream(new FileInputStream(file));
+			JavaLexer lexer = new JavaLexer(input);
+			CommonTokenStream tokens = new CommonTokenStream(lexer);
+			JavaParser parser = new JavaParser(tokens);
+			ParseTree tree = parser.compilationUnit(); 
+			ParseTreeWalker walker = new ParseTreeWalker();		
+			CouplingVisitor visitor = new CouplingVisitor(); 
+			walker.walk(visitor, tree);
 
-				HashMap<String, Boolean> classes = visitor.getClasses();
-				HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
-				HashMap<String, String> rTypes = visitor.getReturnTypes();
-				HashMap<String, String> parentList = visitor.getParents();
-				HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
+			HashMap<String, Boolean> classes = visitor.getClasses();
+			HashMap<String, ArrayList<String>> coups = visitor.getCouplings();
+			HashMap<String, String> rTypes = visitor.getReturnTypes();
+			HashMap<String, String> parentList = visitor.getParents();
+			HashMap<String, HashMap<String, String>> allVars = visitor.getVariables();
 
-				for(String clazz : classes.keySet()){
-					if(classes.get(clazz)){	
-						if(classList.contains(clazz)){
-							System.out.println("Warning: Multiple Class Definitions: " + clazz);
-						}else{
-							classList.add(clazz);
-						}
-					}else{
-						if(unusableClasses.contains(clazz)){
-							System.out.println("Warning: Multiple Class Definitions: " + clazz);
-						}else{
-							unusableClasses.add(clazz);
-						}
-					}
-				}
-
-				HashMap<String, ArrayList<String>> coupsToAdd = new HashMap<String, ArrayList<String>>();
-				for(String clazz : coups.keySet()){
-					String cl = "";
-					if(clazz.contains(".")){
-						cl = clazz.substring(0, clazz.indexOf("."));
-					}else{
-						cl = clazz;
-					}
-
-					if(classList.contains(cl)){
-						coupsToAdd.put(clazz, coups.get(clazz));
-					}
-				}
-
-				couplings.put(file, coupsToAdd);
-
-
-				for(String key : rTypes.keySet()){
-					String clazz = key.substring(0,key.indexOf("."));
-
+			for(String clazz : classes.keySet()){
+				if(classes.get(clazz)){	
 					if(classList.contains(clazz)){
-						if(returnTypes.containsKey(key)){
-							if(!returnTypes.get(key).equals(rTypes.get(key))){
-								System.out.println("Warning: Multiple Method Definitions: " + key + " = {" + returnTypes.get(key) + ", " + rTypes.get(key) + "}");
-							}
-						}
-						returnTypes.put(key, rTypes.get(key));
-					}
-				}
-
-				for(String key: parentList.keySet()){
-					if(classList.contains(key) || unusableClasses.contains(key)){
-						if(parents.containsKey(key)){
-							if(!parents.get(key).equals(parentList.get(key))){
-								System.out.println("Warning: Multiple Class Definitions: " + key + ", Conflicting Parents = {" + parents.get(key) + ", " + parentList.get(key) + "}");
-							}
-						}
-						parents.put(key, parentList.get(key));	
-					}
-				}
-
-				for(String key: allVars.keySet()){
-					String clazz = "";
-					if(key.contains(".")){
-						clazz = key.substring(0, key.indexOf("."));
+						writer.write("Warning: Multiple Class Definitions: " + clazz + "\n");
 					}else{
-						clazz = key;
+						classList.add(clazz);
 					}
-					if(classList.contains(clazz)){
-						if(!key.contains(".")){
-							// Looking only for global variables
-							HashMap<String, String> gVars = allVars.get(key);
+				}else{
+					if(unusableClasses.contains(clazz)){
+						writer.write("Warning: Multiple Class Definitions: " + clazz + "\n");
+					}else{
+						unusableClasses.add(clazz);
+					}
+				}
+			}
+
+			HashMap<String, ArrayList<String>> coupsToAdd = new HashMap<String, ArrayList<String>>();
+			for(String clazz : coups.keySet()){
+				String cl = "";
+				if(clazz.contains(".")){
+					cl = clazz.substring(0, clazz.indexOf("."));
+				}else{
+					cl = clazz;
+				}
+
+				if(classList.contains(cl)){
+					coupsToAdd.put(clazz, coups.get(clazz));
+				}
+			}
+
+			couplings.put(file, coupsToAdd);
+
+
+			for(String key : rTypes.keySet()){
+				String clazz = key.substring(0,key.indexOf("."));
+
+				if(classList.contains(clazz)){
+					if(returnTypes.containsKey(key)){
+						if(!returnTypes.get(key).equals(rTypes.get(key))){
+							writer.write("Warning: Multiple Method Definitions: " + key + " = {" + returnTypes.get(key) + ", " + rTypes.get(key) + "}\n");
+						}
+					}
+					returnTypes.put(key, rTypes.get(key));
+				}
+			}
+
+			for(String key: parentList.keySet()){
+				if(classList.contains(key) || unusableClasses.contains(key)){
+					if(parents.containsKey(key)){
+						if(!parents.get(key).equals(parentList.get(key))){
+							writer.write("Warning: Multiple Class Definitions: " + key + ", Conflicting Parents = {" + parents.get(key) + ", " + parentList.get(key) + "}\n");
+						}
+					}
+					parents.put(key, parentList.get(key));	
+				}
+			}
+
+			for(String key: allVars.keySet()){
+				String clazz = "";
+				if(key.contains(".")){
+					clazz = key.substring(0, key.indexOf("."));
+				}else{
+					clazz = key;
+				}
+				if(classList.contains(clazz)){
+					if(!key.contains(".")){
+						// Looking only for global variables
+						HashMap<String, String> gVars = allVars.get(key);
 				
-							if(variables.containsKey(key)){
-								HashMap<String, String> eVars = variables.get(key);
-								for(String gv: gVars.keySet()){
-									if(eVars.containsKey(gv)){
-										if(!eVars.get(gv).equals(gVars.get(gv))){
-											System.out.println("Warning: Multiple Class Definitions: " + key + ", Conflicting Variable: " + gv + " = {" + eVars.get(gv) + ", " + gVars.get(gv) + "}");
-										}
+						if(variables.containsKey(key)){
+							HashMap<String, String> eVars = variables.get(key);
+							for(String gv: gVars.keySet()){
+								if(eVars.containsKey(gv)){
+									if(!eVars.get(gv).equals(gVars.get(gv))){
+										writer.write("Warning: Multiple Class Definitions: " + key + ", Conflicting Variable: " + gv + " = {" + eVars.get(gv) + ", " + gVars.get(gv) + "}\n");
 									}
-									eVars.put(gv, gVars.get(gv));
-								}	
-								variables.put(key, eVars);
-							}else{
-								variables.put(key, gVars);
-							}
-							//System.out.println("+" + key + "-" + variables.get(key));
+								}
+								eVars.put(gv, gVars.get(gv));
+							}	
+							variables.put(key, eVars);
+						}else{
+							variables.put(key, gVars);
 						}
+						//System.out.println("+" + key + "-" + variables.get(key));
 					}
 				}
-				
-			}catch(IOException e){
-				e.printStackTrace();
 			}
 		}
+		writer.close();
 	}
 
 	/* Filter couplings to simplify nested couplings
@@ -327,8 +338,8 @@ public class CouplingMapper{
 	 * to become A.z.
 	 * In this process, non-project classes are also removed.
 	 */
-	public void filterCouplings(){
-
+	public void filterCouplings() throws IOException{
+		BufferedWriter writer = new BufferedWriter(new FileWriter(project + ".log"));
 		for(String clazz : couplings.keySet()){
 			HashMap<String, ArrayList<String>> coups = couplings.get(clazz);
 			for(String method : coups.keySet()){
@@ -473,7 +484,7 @@ public class CouplingMapper{
 										coupling = coupling + "." + parts[word];
 									}
 								}else{
-									System.out.println("Not Found: " + coupling);
+									writer.write("Not Found: " + coupling + "\n");
 									break;
 								}	
 							}else{
@@ -520,9 +531,9 @@ public class CouplingMapper{
 									//System.out.println("--" + parents.get(pName));	
 									if(!classList.contains(parents.get(pName))){
 										if(unusableClasses.contains(parents.get(pName))){
-											System.out.println("Coupled to interface or abstract class: " + coupling);
+											writer.write("Coupled to interface or abstract class: " + coupling + "\n");
 										}else{
-											System.out.println("Coupled to non-project parent: " + coupling);
+											writer.write("Coupled to non-project parent: " + coupling + "\n");
 										}
 										found = true;
 										break;
@@ -559,21 +570,22 @@ public class CouplingMapper{
 							}
 
 							if(!found){
-								System.out.println("Not Found: " + coupling);
+								writer.write("Not Found: " + coupling + "\n");
 							}
 						}else{
 							filteredCoups.add(coupling);
 						}
 					}else if(unusableClasses.contains(coupled)){
-						System.out.println("Coupled to abstract class or interface: " + coupling);
+						writer.write("Coupled to abstract class or interface: " + coupling + "\n");
 					}else{
-						System.out.println("Coupled to non-project class: " + coupling);
+						writer.write("Coupled to non-project class: " + coupling + "\n");
 					}
 				}
 				coups.put(method, filteredCoups);
 				couplings.put(clazz, coups);
 			}
 		}
+		writer.close();
 	}
 
 	// Getters and setters
@@ -599,5 +611,13 @@ public class CouplingMapper{
 	
 	public HashMap<String, HashMap<String, String>> getVariables(){
 		return variables;
+	}
+
+	public String getProject(){
+		return project;
+	}
+
+	public void setProject(String project){
+		this.project = project;
 	}
 }
