@@ -21,6 +21,7 @@ import org.antlr.v4.runtime.tree.ParseTreeWalker;
 
 import org.graphstream.graph.*;
 import org.graphstream.graph.implementations.*;
+import org.graphstream.algorithm.Dijkstra;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -130,6 +131,8 @@ public class CouplingMapper{
 	public void generateGraph(ArrayList<String> targets, boolean display){
 		System.setProperty("org.graphstream.ui.renderer", "org.graphstream.ui.j2dviewer.J2DGraphRenderer");
 		Graph graph = new MultiGraph("couplings");
+		HashMap<String, HashSet> coverage = new HashMap<String, HashSet>();
+
 		if(display){
 			// Define custom coloring for graph
 			graph.addAttribute("ui.stylesheet", "graph { fill-color: white; }" +
@@ -147,6 +150,7 @@ public class CouplingMapper{
 		// Add all classes as nodes
 		for(String clazz: classList){
 			graph.addNode(clazz);
+			coverage.put(clazz, new HashSet<String>());
 			if(display){
 				graph.getNode(clazz).addAttribute("ui.label", clazz);
 				if(targets.contains(clazz)){
@@ -188,6 +192,9 @@ public class CouplingMapper{
 						}else{
 							graph.getEdge(eName).setAttribute("weight", graph.getEdge(eName).getNumber("weight") + 1);
 						}
+						HashSet newCov = coverage.get(source);
+						newCov.add(sink);
+						coverage.put(source, newCov);
 					}
 				}
 			}
@@ -207,6 +214,21 @@ public class CouplingMapper{
 	
 			graph.display();	
 			//graph.addAttribute("ui.screenshot", project + ".png");	
+		}
+
+		// Shortest Path and Coverage
+		Dijkstra dijkstra = new Dijkstra(Dijkstra.Element.NODE, null, null);
+		dijkstra.init(graph);
+		for(String clazz: classList){
+			dijkstra.setSource(graph.getNode(clazz));
+			dijkstra.compute();
+			for (String target : targets){
+				Node node = graph.getNode(target);
+				System.out.printf("%s->%s:%10.2f%n", dijkstra.getSource(), node, dijkstra.getPathLength(node));
+				System.out.println(dijkstra.getPath(node));
+			}
+			System.out.println("Coverage: " + coverage.get(clazz).toString());
+			dijkstra.clear();
 		}
 	}
 
