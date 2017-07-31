@@ -23,6 +23,7 @@ public class CouplingVisitor extends JavaBaseListener {
 	// Tracks current program location
 	private Stack<String> location;
 	private String outerClass;
+	private int anonymousCounter;
 
 	// List of classes, and whether they can couple (false = interface)
 	private HashMap<String, Boolean> classes;
@@ -71,6 +72,7 @@ public class CouplingVisitor extends JavaBaseListener {
 		returnTypes = new HashMap<String, String>();
 		parents = new HashMap<String, String>();
 		importedSubclasses = new ArrayList<String>();
+		anonymousCounter = 0;
 	}
 
 	/* Import statements can help qualify subclasses imported from within the project.
@@ -105,12 +107,13 @@ public class CouplingVisitor extends JavaBaseListener {
 
 	
 	// Abstract classes cannot be instantiated, so we mark them as "uncouplable"
+	/*
 	@Override
 	public void enterClassOrInterfaceModifier(JavaParser.ClassOrInterfaceModifierContext ctx){
 		if(ctx.getText().equals("abstract")){
 			canCouple = false;
 		}
-	}
+	}*/
 
 	/* Gets the class name and whether it inherits from any parents
 	* classDeclaration :   'class' className typeParameters? ('extends' typeType)?
@@ -1230,7 +1233,8 @@ public class CouplingVisitor extends JavaBaseListener {
 			if(currentClass.contains(".")){
 				currentClass = currentClass.substring(0, currentClass.indexOf("."));
 			}
-			String cName = currentClass + ":" + type;
+			anonymousCounter++;
+			String cName = currentClass + ":" + anonymousCounter;
 				
 			location.push(cName);
 			classes.put(cName, canCouple);
@@ -1299,7 +1303,8 @@ public class CouplingVisitor extends JavaBaseListener {
 			if(currentClass.contains(".")){
 				currentClass = currentClass.substring(0, currentClass.indexOf("."));
 			}
-			String cName = currentClass + ":" + type;
+			anonymousCounter++;
+			String cName = currentClass + ":" + anonymousCounter;
 				
 			location.push(cName);
 			classes.put(cName, canCouple);
