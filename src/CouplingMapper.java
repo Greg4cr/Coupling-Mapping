@@ -3,7 +3,11 @@
 * Utility that maps couplings between all Java classes that are part 
 * of a project.
 * 
-* Usage: java CouplingMapper <directory where project source is contained>
+* Usage: java CouplingMapper 
+* -p=<directory where project source is contained> 
+* -n=<project name> 
+* -t=<file containing list of targets> 
+* -d=<true/false, display the graph>
 *
 * This Source Code Form is subject to the terms of the Mozilla Public
 * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -57,39 +61,51 @@ public class CouplingMapper{
 	}
 
 	public static void main(String[] args) throws IllegalArgumentException{
-		if(args.length > 3){
+		if(args.length > 4){
 			throw new IllegalArgumentException("Incorrect number of arguments: "+args.length);
 		}else{
 			CouplingMapper mapper = new CouplingMapper();
 			try{
-				// Second argument (optional) is a project name
-				if(args.length > 1 && !args[1].equals("")){
-					mapper.setProject(args[1]);
-				}
-				// Produce list of Java classes.
-				mapper.generateClassList(args[0]);
-				// Generate couplings for each class
-				mapper.generateCouplings();
-				// Filter couplings to remove non-project classes and simplify nesting
-				mapper.filterCouplings();
-	
-				// Generate CSV of results 
-				mapper.generateCSV();
-
-				// Argument 3 (optional) is a list of faulty classes
+				String path = "";
+				Boolean display = true;	
 				ArrayList<String> targets = new ArrayList<String>();
-				if(args.length == 3){
-					BufferedReader reader = new BufferedReader(new FileReader(args[2]));	
-					String current = "";
-					while((current = reader.readLine()) != null){
-						targets.add(current);
+
+				for(int arg = 0; arg < args.length; arg++){
+					String[] words = args[arg].split("=");
+					if(words[0].equals("-p")){
+						path = words[1];
+					}else if(words[0].equals("-n")){
+						mapper.setProject(words[1]);
+					}else if(words[0].equals("-t")){
+						BufferedReader reader = new BufferedReader(new FileReader(words[1]));	
+						String current = "";
+						while((current = reader.readLine()) != null){
+							targets.add(current);
+						}
+					}else if(words[0].equals("-d")){
+						if(words[1].equals("true")){
+							display=true;
+						}else{
+							display=false;
+						}
+					}else{
+						throw new Exception("Incorrect Argument: " + words[0]);
 					}
 				}
 
-				// Generate graph
-				mapper.generateGraph(targets);
-			
-			}catch(IOException e){
+				if(!path.equals("")){	
+					// Produce list of Java classes.
+					mapper.generateClassList(path);
+					// Generate couplings for each class
+					mapper.generateCouplings();
+					// Filter couplings to remove non-project classes and simplify nesting
+					mapper.filterCouplings();
+					// Generate CSV of results 
+					mapper.generateCSV();
+					// Generate graph
+					mapper.generateGraph(targets, display);
+				}
+			}catch(Exception e){
 				e.printStackTrace();
 			}
 		}	
@@ -111,27 +127,31 @@ public class CouplingMapper{
 	}
 
 	// Generate graph
-	public void generateGraph(ArrayList<String> targets){
+	public void generateGraph(ArrayList<String> targets, boolean display){
 		System.setProperty("org.graphstream.ui.renderer", "org.graphstream.ui.j2dviewer.J2DGraphRenderer");
 		Graph graph = new MultiGraph("couplings");
-		// Define custom coloring for graph
-		graph.addAttribute("ui.stylesheet", "graph { fill-color: white; }" +
-			"node { fill-color: black; text-background-mode: rounded-box; text-alignment: under; text-offset: 0, 5;}" +
-			"node.target { fill-color: red; }" +
-			"edge { shape: line; fill-color: #222; arrow-size: 5px, 4px;}" +
-			"edge.high { fill-color: red; }" +
-			"edge.medium { fill-color: orange; }" +
-			"edge.low { fill-color: blue; }"
-		);
-		graph.addAttribute("ui.quality");
-		graph.addAttribute("ui.antialias");
+		if(display){
+			// Define custom coloring for graph
+			graph.addAttribute("ui.stylesheet", "graph { fill-color: white; }" +
+				"node { fill-color: black; text-background-mode: rounded-box; text-alignment: under; text-offset: 0, 5;}" +
+				"node.target { fill-color: red; }" +
+				"edge { shape: line; fill-color: #222; arrow-size: 5px, 4px;}" +
+				"edge.high { fill-color: red; }" +
+				"edge.medium { fill-color: orange; }" +
+				"edge.low { fill-color: blue; }"
+			);
+			graph.addAttribute("ui.quality");
+			graph.addAttribute("ui.antialias");
+		}
 
 		// Add all classes as nodes
 		for(String clazz: classList){
 			graph.addNode(clazz);
-			graph.getNode(clazz).addAttribute("ui.label", clazz);
-			if(targets.contains(clazz)){
-				graph.getNode(clazz).addAttribute("ui.class", "target");
+			if(display){
+				graph.getNode(clazz).addAttribute("ui.label", clazz);
+				if(targets.contains(clazz)){
+					graph.getNode(clazz).addAttribute("ui.class", "target");
+				}
 			}
 		}
 
@@ -172,20 +192,22 @@ public class CouplingMapper{
 				}
 			}
 		}
-		// Color edges by degree of coupling
-		for(Edge edge: graph.getEachEdge()){
-			double weight = edge.getNumber("weight");
-			if(weight <= 5){
-				edge.addAttribute("ui.class", "low");
-			}else if(weight <= 10){
-				edge.addAttribute("ui.class", "medium");
-			}else{
-				edge.addAttribute("ui.class", "high");
+		if(display){
+			// Color edges by degree of coupling
+			for(Edge edge: graph.getEachEdge()){
+				double weight = edge.getNumber("weight");
+				if(weight <= 5){
+					edge.addAttribute("ui.class", "low");
+				}else if(weight <= 10){
+					edge.addAttribute("ui.class", "medium");
+				}else{
+					edge.addAttribute("ui.class", "high");
+				}
 			}
+	
+			graph.display();	
+			//graph.addAttribute("ui.screenshot", project + ".png");	
 		}
-		
-		graph.display();	
-		//graph.addAttribute("ui.screenshot", project + ".png");	
 	}
 
 	// Generates a list of Java files from a directory

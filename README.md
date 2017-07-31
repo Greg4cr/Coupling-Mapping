@@ -15,7 +15,7 @@ The project can be compiled using the provided ant file (target "ant compile"). 
 
 Class CouplingMapper is the main entry point. It generates a CSV file of couplings (Class.method -> Class.variable/method) for all Java classes in a project and a graph of the project. It takes one required argument - a path to the directory where Java files are contained - and one optional argument - a path of a file listing target classes). It recursively searches all subdirectories for Java files.
 
-    java -cp ".:lib/antlr-4.5.3-complete.jar" CouplingMapper /path/to/dir/ (optional: /path/to/list/of/target/classes)
+    java -cp "bin/:lib/antlr-4.5.3-complete.jar:lib/gs-core-1.3.jar:lib/gs-ui-1.3.jar:lib/gs-algos-1.3.jar" CouplingMapper -p=<path to code> -n=<project name> -t=<list of target classes> -d=<true/false, display graph>
 
 The Java class CouplingVisitor generates a CSV file for an individual .Java file of couplings (Class.Method -> Class.variable/method). This is an unfiltered list (layered calls not simplified). CouplingMapper uses this, then filters the results.
 
