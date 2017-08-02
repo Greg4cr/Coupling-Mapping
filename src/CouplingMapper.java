@@ -11,6 +11,9 @@
 * -o=<optimization mode, default is none. Options: random, none>
 * -b=<search budget, default is 120 seconds>
 * -p=<solution population, default is 100>
+* -r=<percent of population to retain in GA, default is 0.1>
+* -x=<crossover rate for GA, default is 0.15>
+* -m=<mutation rate for GA, default is 0.15>
 *
 * This Source Code Form is subject to the terms of the Mozilla Public
 * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -79,6 +82,9 @@ public class CouplingMapper{
 			int population = 100;
 			int budget = 120;
 			String mode = "none";
+			double retention = 0.1;
+			double crossover = 0.15;
+			double mutation = 0.15;
 
 			for(int arg = 0; arg < args.length; arg++){
 				String[] words = args[arg].split("=");
@@ -104,6 +110,12 @@ public class CouplingMapper{
 					budget = Integer.parseInt(words[1]);
 				}else if(words[0].equals("-p")){
 					population = Integer.parseInt(words[1]);
+				}else if(words[0].equals("-r")){
+					retention = Double.parseDouble(words[1]);
+				}else if(words[0].equals("-m")){
+					mutation = Double.parseDouble(words[1]);
+				}else if(words[0].equals("-x")){
+					crossover = Double.parseDouble(words[1]);
 				}else{
 					throw new Exception("Incorrect Argument: " + words[0]);
 				}
@@ -122,7 +134,7 @@ public class CouplingMapper{
 				mapper.generateGraph(targets, display);
 				// Generate set of classes to generate tests for.
 				if(!mode.equals("none")){
-					mapper.optimizeGenSet(targets, mode, population, budget);
+					mapper.optimizeGenSet(targets, mode, population, budget, retention, mutation, crossover);
 				}
 			}
 		}catch(Exception e){
@@ -230,14 +242,17 @@ public class CouplingMapper{
 	}
 
 	// Optimizes a set of classes for test generation
-	public void optimizeGenSet(ArrayList<String> targets, String mode, int population, int budget) throws Exception{
+	public void optimizeGenSet(ArrayList<String> targets, String mode, int population, int budget, double retention, double mutation, double crossover) throws Exception{
 		// Pre-compute and cache all shortest path distances and coverage
 		// These are calculated per target class
 		HashMap<String, ArrayList<Double>> pathLengths = new HashMap<String, ArrayList<Double>>();
 		HashMap<String, ArrayList<ArrayList<Node>>> coverage = new HashMap<String, ArrayList<ArrayList<Node>>>();
 		ArrayList<Double> maxLength = new ArrayList<Double>();
+		ArrayList<HashSet<String>> maxCoverage = new ArrayList<HashSet<String>>();
+
 		for(String target: targets){
 			maxLength.add(0.0);
+			maxCoverage.add(new HashSet<String>());
 		}
 		Dijkstra dijkstra = new Dijkstra(Dijkstra.Element.NODE, null, null);
 		dijkstra.init(graph);
@@ -258,6 +273,11 @@ public class CouplingMapper{
 					}
 					ArrayList<Node> classes = new ArrayList(dijkstra.getPath(node).getNodePath());
 					pathClasses.add(classes);
+					HashSet<String> maxCoveredClasses = maxCoverage.get(currentTarget);
+					for(Node n: classes){
+						maxCoveredClasses.add(n.getId());
+					}
+					maxCoverage.set(currentTarget, maxCoveredClasses);
 				}
 			
 				// Only add it to the cache if the node is on at least one path to a target
@@ -279,7 +299,9 @@ public class CouplingMapper{
 
 		// Generate solutions
 		if(mode.equals("random")){
-			randomSearch(population, budget, targets, pathLengths, coverage, maxLength);
+			randomSearch(population, budget, targets, pathLengths, coverage, maxLength, maxCoverage);
+		}else if(mode.equals("ga")){
+			geneticSearch(population, budget, targets, pathLengths, coverage, maxLength, maxCoverage, retention, mutation, crossover);
 		}else{
 			throw new Exception("Invalid search mode: " + mode);
 		}
@@ -289,7 +311,7 @@ public class CouplingMapper{
 	// and continues until the budget is exhausted 
 	public void randomSearch(int population, int budget, ArrayList<String> targets, 
 			HashMap<String, ArrayList<Double>> pathLengths, HashMap<String, ArrayList<ArrayList<Node>>> coverage,
-			ArrayList<Double> maxLength){
+			ArrayList<Double> maxLength, ArrayList<HashSet<String>> maxCoverage){
 
 		// Track the best solution seen		
 		ArrayList<String> bestSolution = new ArrayList<String>();
@@ -316,7 +338,7 @@ public class CouplingMapper{
 				}
 				solutions.add(new ArrayList<String>(solutionSet));
 				// Score solution
-				scores.add(scoreSolution(solutions.get(member), targets, pathLengths, coverage, maxLength));
+				scores.add(scoreSolution(solutions.get(member), targets, pathLengths, coverage, maxLength, maxCoverage));
 				// If the score is better, mark this as the "best" to date
 				if(scores.get(member) < bestScore){
 					bestScore = scores.get(member);
@@ -332,20 +354,229 @@ public class CouplingMapper{
 		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());
 	}
 
+	// Simple genetic algorithm. Generates populations of solutions, tracks the best,
+	// formulates new population using retention, mutation, crossover, and replacement.
+	// Continues until the budget is exhausted 
+	public void geneticSearch(int population, int budget, ArrayList<String> targets, 
+			HashMap<String, ArrayList<Double>> pathLengths, HashMap<String, ArrayList<ArrayList<Node>>> coverage,
+			ArrayList<Double> maxLength, ArrayList<HashSet<String>> maxCoverage, double retention, double mutation, double crossover){
+
+		ArrayList<String> classes = new ArrayList<String>(pathLengths.keySet());
+		// Track the best solution seen		
+		ArrayList<String> bestSolution = new ArrayList<String>();
+		double bestScore = 100000;
+
+		int generations = 0;
+		ArrayList<ArrayList<String>> solutions = new ArrayList<ArrayList<String>>();
+		ArrayList<Double> scores = new ArrayList<Double>();
+
+		// Form initial population completely at random
+		for(int member = 0; member < population; member++){
+			HashSet<String> solutionSet = new HashSet<String>();
+
+			for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, 10); choice++){
+				solutionSet.add(classes.get(ThreadLocalRandom.current().nextInt(0, classes.size())));
+			}
+			solutions.add(new ArrayList<String>(solutionSet));
+			// Score solution
+			scores.add(scoreSolution(solutions.get(member), targets, pathLengths, coverage, maxLength, maxCoverage));
+			// If the score is better, mark this as the "best" to date
+			if(scores.get(member) < bestScore){
+				bestScore = scores.get(member);
+				bestSolution = solutions.get(member);
+			}
+		}
+
+		boolean timeRemaining = true;
+		long startingTime = System.currentTimeMillis();
+		long elapsedTime = (System.currentTimeMillis() - startingTime) / 1000;
+
+		while(elapsedTime <= budget){
+			// If time remains in the budget, generate a population of solutions
+			generations++;
+
+			// Form new population
+			ArrayList<ArrayList<String>> newSolutions = new ArrayList<ArrayList<String>>();
+			ArrayList<Double> newScores = new ArrayList<Double>();
+
+			// Retain the top-scoring population members
+			for(int choice = 0; choice < ((int) (retention * population)); choice++){
+				double topScore = 100000;
+				int topPosition = -1;
+				for(int score = 0; score < scores.size(); score++){
+					if(scores.get(score) < topScore){
+						topScore = scores.get(score);
+						topPosition = score;
+					}
+				}
+				newSolutions.add(solutions.get(topPosition));
+				newScores.add(topScore);
+				solutions.remove(topPosition);
+				scores.remove(topScore);
+			}
+
+			// Mutate some of these members
+			ArrayList<ArrayList<String>> mutatedSols = new ArrayList<ArrayList<String>>();
+			for(int choice = 0; choice < ((int) (mutation * population)); choice++){
+				ArrayList<String> chosen = newSolutions.get(ThreadLocalRandom.current().nextInt(0, newSolutions.size()));
+				ArrayList<String> mutated = mutateSolution(chosen, classes);
+				mutatedSols.add(mutated);
+			}
+			
+			// Perform crossover to create new members
+			for(int choice = 0; choice < ((int) (crossover * population)); choice += 2){
+				int first = 0;
+				int second = 0;
+				while(first == second){
+					// Which solutions should be the parents?
+					first = ThreadLocalRandom.current().nextInt(0, newSolutions.size());
+					second = ThreadLocalRandom.current().nextInt(0, newSolutions.size());
+				}
+
+				ArrayList<ArrayList<String>> children = crossoverSolutions(newSolutions.get(first), newSolutions.get(second));
+				mutatedSols.add(children.get(0));
+				mutatedSols.add(children.get(1));
+			}
+
+			// Add mutated and crossover solutions to set
+			for(ArrayList<String> mutated: mutatedSols){	
+				newSolutions.add(mutated);
+				newScores.add(scoreSolution(mutated, targets, pathLengths, coverage, maxLength, maxCoverage));
+			}
+	
+			// Fill the rest randomly
+			for(int member = newSolutions.size() - 1; member < population; member++){
+				HashSet<String> solutionSet = new HashSet<String>();
+
+				for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, 10); choice++){
+					solutionSet.add(classes.get(ThreadLocalRandom.current().nextInt(0, classes.size())));
+				}
+				newSolutions.add(new ArrayList<String>(solutionSet));
+				// Score solution
+				newScores.add(scoreSolution(newSolutions.get(member), targets, pathLengths, coverage, maxLength, maxCoverage));
+				// If the score is better, mark this as the "best" to date
+				if(newScores.get(member) < bestScore){
+					bestScore = newScores.get(member);
+					bestSolution = newSolutions.get(member);
+				}
+			}
+
+			// Set new population as population
+			solutions = newSolutions;
+			scores = newScores;
+
+			// How much time has elapsed?
+			elapsedTime = (System.currentTimeMillis() - startingTime) / 1000;
+			System.out.println(generations + " : " + elapsedTime);
+		}
+
+		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());
+		//scoreSolution(bestSolution, targets, pathLengths, coverage, maxLength, maxCoverage);
+	}
+
+	// Mutate a solution by adding, deleting, or changing one of the classes
+	public ArrayList<String> mutateSolution(ArrayList<String> solution, ArrayList<String> classes){
+		// First, choose whether you are adding, deleting, or changing a reference.
+		HashSet<String> mutated = new HashSet<String>(solution);
+
+		int choice = ThreadLocalRandom.current().nextInt(1, 4);
+
+		// If all classes in set, delete one
+		if(choice == 1 && mutated.size() == classes.size()){
+			choice = 2;
+		// If no classes in set, add one
+		}else if(choice >= 2 && mutated.size() == 0){
+			choice = 1;
+		}
+
+		if(choice == 1){
+			// Add a class
+			int initSize = mutated.size();
+			while(initSize == mutated.size()){
+				mutated.add(classes.get(ThreadLocalRandom.current().nextInt(0, classes.size())));
+			}
+		}else if(choice == 2){
+			// Delete a class
+			mutated.remove(solution.get(ThreadLocalRandom.current().nextInt(0, solution.size())));
+		}else{
+			// Change one class to another. Really a delete and an add (make sure they aren't the same
+			// The class to delete.
+			String toRemove = solution.get(ThreadLocalRandom.current().nextInt(0, solution.size()));
+			mutated.remove(toRemove);
+			// The class to add
+			int initSize = mutated.size();
+			while(initSize == mutated.size()){
+				String toAdd = classes.get(ThreadLocalRandom.current().nextInt(0, classes.size()));
+				if(!toAdd.equals(toRemove)){
+					mutated.add(toAdd);
+				}
+			}
+		}
+
+		return new ArrayList<String>(mutated);
+	}	
+
+	// Create two children by performing crossover between two parents
+	// Implements discrete recombination
+	public ArrayList<ArrayList<String>> crossoverSolutions(ArrayList<String> firstParent, ArrayList<String> secondParent){
+		ArrayList<ArrayList<String>> children = new ArrayList<ArrayList<String>>();
+		HashSet<String> firstChild = new HashSet<String>();
+		HashSet<String> secondChild = new HashSet<String>();
+		int maxPos = Math.max(firstParent.size(), secondParent.size());
+
+		// First child
+		// For each position in a parent solution
+		for(int position = 0; position < maxPos; position++){
+			// Flip a coin
+			if(ThreadLocalRandom.current().nextInt(1, 3) == 1){
+				// Take from first parent
+				if(position < firstParent.size()){
+					firstChild.add(firstParent.get(position));
+				}
+			}else{
+				// Take from second parent
+				if(position < secondParent.size()){
+					firstChild.add(secondParent.get(position));
+				}
+			}
+		}
+		// Second child
+		// For each position in a parent solution
+		for(int position = 0; position < maxPos; position++){
+			// Flip a coin
+			if(ThreadLocalRandom.current().nextInt(1, 3) == 1){
+				// Take from first parent
+				if(position < firstParent.size()){
+					secondChild.add(firstParent.get(position));
+				}
+			}else{
+				// Take from second parent
+				if(position < secondParent.size()){
+					secondChild.add(secondParent.get(position));
+				}
+			}
+		}
+		children.add(new ArrayList<String>(firstChild));
+		children.add(new ArrayList<String>(secondChild));
+
+		return children;
+	}
+
 	/* Calculate a score for a set of classes
-	 * Score is the Euclidean distance to a sweet spot of min distance and max coverage
+	 * Score is the Euclidean distance to a sweet spot of min distance, 
+	 * min size, and max coverage.
 	 * Distance = average distance from target for each node
 	 * Max distance is calculated from longest "shortest" path
 	 * Min distance = 2.0 (source, target)
 	 * Coverage = number of unique classes covered by the set, per target
 	 * Max coverage is all classes on a path to one of the targets
 	 * Min coverage = 2.0 (source, target)
-	 * score = root(norm(distance)^2 + (norm(coverage) - 1)^2)
+	 * score = root(norm(distance)^2 + norm(size)^2 + (norm(coverage) - 1)^2)
 	 * Calculated for each target, then summed.
 	 */
 	public double scoreSolution(ArrayList<String> solution, ArrayList<String> targets, 
 			HashMap<String, ArrayList<Double>> pathLengths, HashMap<String, ArrayList<ArrayList<Node>>> coverage,
-			ArrayList<Double> maxLength){
+			ArrayList<Double> maxLength, ArrayList<HashSet<String>> maxCoverage){
 		ArrayList<Double> scores = new ArrayList<Double>();
 		for(int currentTarget = 0; currentTarget < targets.size(); currentTarget++){
 			double avgDistance = 0.0;
@@ -374,16 +605,22 @@ public class CouplingMapper{
 			// Normalize the distance
 			avgDistance = (avgDistance - 2.0) / (maxLength.get(currentTarget) - 2.0);
 			
+			// Calculate the set size
+			double size = (solution.size() - 1.0) / (pathLengths.keySet().size() - 1.0);
+
 			// Calculate coverage
 			double coverageScore = coveredClasses.size();
-			coverageScore = (coverageScore - 2.0) / (pathLengths.keySet().size() - 2.0);
+			coverageScore = (coverageScore - 2.0) / (maxCoverage.get(currentTarget).size() - 2.0);
 			coverageScore = coverageScore - 1; // Convert to minimization
 
 			// Combine
-			double score = Math.sqrt(Math.pow(avgDistance, 2) + Math.pow(coverageScore, 2));
+			double score = Math.sqrt(Math.pow(avgDistance, 2) + Math.pow(size, 2) + Math.pow(coverageScore, 2));
+			//System.out.println("---" + avgDistance + "," + size + "," + coverageScore);
 
 			scores.add(score);
 		}
+
+		//System.out.println(scores.toString());
 
 		double finalScore = 0.0;
 		for(double score: scores){
