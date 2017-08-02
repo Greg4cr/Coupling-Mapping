@@ -4,10 +4,13 @@
 * of a project.
 * 
 * Usage: java CouplingMapper 
-* -p=<directory where project source is contained> 
+* -l=<directory where project source is contained> 
 * -n=<project name> 
 * -t=<file containing list of targets> 
 * -d=<true/false, display the graph>
+* -o=<optimization mode, default is none. Options: random, none>
+* -b=<search budget, default is 120 seconds>
+* -p=<solution population, default is 100>
 *
 * This Source Code Form is subject to the terms of the Mozilla Public
 * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -22,6 +25,7 @@ import org.antlr.v4.runtime.tree.ParseTreeWalker;
 import org.graphstream.graph.*;
 import org.graphstream.graph.implementations.*;
 import org.graphstream.algorithm.Dijkstra;
+import static org.graphstream.algorithm.Toolkit.*;
 
 import java.io.BufferedReader;
 import java.io.BufferedWriter;
@@ -34,6 +38,8 @@ import java.util.HashMap;
 import java.util.ArrayList;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 
 public class CouplingMapper{
 	// List of classes
@@ -50,6 +56,8 @@ public class CouplingMapper{
 	private HashMap<String, HashMap<String, String>> variables;
 	// Project name
 	private String project;
+	// Graph of couplings
+	private Graph graph;
 
 	public CouplingMapper(){
 		classList = new ArrayList<String>();
@@ -59,58 +67,68 @@ public class CouplingMapper{
 		parents = new HashMap<String, String>();
 		variables = new HashMap<String, HashMap<String, String>>();
 		project = "results";
+		graph = new MultiGraph("couplings");
 	}
 
 	public static void main(String[] args) throws IllegalArgumentException{
-		if(args.length > 4){
-			throw new IllegalArgumentException("Incorrect number of arguments: "+args.length);
-		}else{
-			CouplingMapper mapper = new CouplingMapper();
-			try{
-				String path = "";
-				Boolean display = true;	
-				ArrayList<String> targets = new ArrayList<String>();
+		CouplingMapper mapper = new CouplingMapper();
+		try{
+			String path = "";
+			Boolean display = true;	
+			ArrayList<String> targets = new ArrayList<String>();
+			int population = 100;
+			int budget = 120;
+			String mode = "none";
 
-				for(int arg = 0; arg < args.length; arg++){
-					String[] words = args[arg].split("=");
-					if(words[0].equals("-p")){
-						path = words[1];
-					}else if(words[0].equals("-n")){
-						mapper.setProject(words[1]);
-					}else if(words[0].equals("-t")){
-						BufferedReader reader = new BufferedReader(new FileReader(words[1]));	
-						String current = "";
-						while((current = reader.readLine()) != null){
-							targets.add(current);
-						}
-					}else if(words[0].equals("-d")){
-						if(words[1].equals("true")){
-							display=true;
-						}else{
-							display=false;
-						}
-					}else{
-						throw new Exception("Incorrect Argument: " + words[0]);
+			for(int arg = 0; arg < args.length; arg++){
+				String[] words = args[arg].split("=");
+				if(words[0].equals("-l")){
+					path = words[1];
+				}else if(words[0].equals("-n")){
+					mapper.setProject(words[1]);
+				}else if(words[0].equals("-t")){
+					BufferedReader reader = new BufferedReader(new FileReader(words[1]));	
+					String current = "";
+					while((current = reader.readLine()) != null){
+						targets.add(current);
 					}
+				}else if(words[0].equals("-d")){
+					if(words[1].equals("true")){
+						display=true;
+					}else{
+						display=false;
+					}
+				}else if(words[0].equals("-o")){
+					mode = words[1];	
+				}else if(words[0].equals("-b")){
+					budget = Integer.parseInt(words[1]);
+				}else if(words[0].equals("-p")){
+					population = Integer.parseInt(words[1]);
+				}else{
+					throw new Exception("Incorrect Argument: " + words[0]);
 				}
-
-				if(!path.equals("")){	
-					// Produce list of Java classes.
-					mapper.generateClassList(path);
-					// Generate couplings for each class
-					mapper.generateCouplings();
-					// Filter couplings to remove non-project classes and simplify nesting
-					mapper.filterCouplings();
-					// Generate CSV of results 
-					mapper.generateCSV();
-					// Generate graph
-					mapper.generateGraph(targets, display);
-				}
-			}catch(Exception e){
-				e.printStackTrace();
 			}
-		}	
-	}
+
+			if(!path.equals("")){	
+				// Produce list of Java classes.
+				mapper.generateClassList(path);
+				// Generate couplings for each class
+				mapper.generateCouplings();
+				// Filter couplings to remove non-project classes and simplify nesting
+				mapper.filterCouplings();
+				// Generate CSV of results 
+				mapper.generateCSV();
+				// Generate graph
+				mapper.generateGraph(targets, display);
+				// Generate set of classes to generate tests for.
+				if(!mode.equals("none")){
+					mapper.optimizeGenSet(targets, mode, population, budget);
+				}
+			}
+		}catch(Exception e){
+			e.printStackTrace();
+		}
+	}	
 
 	// Generate CSV of results
 	public void generateCSV() throws IOException{
@@ -130,8 +148,6 @@ public class CouplingMapper{
 	// Generate graph
 	public void generateGraph(ArrayList<String> targets, boolean display){
 		System.setProperty("org.graphstream.ui.renderer", "org.graphstream.ui.j2dviewer.J2DGraphRenderer");
-		Graph graph = new MultiGraph("couplings");
-		HashMap<String, HashSet> coverage = new HashMap<String, HashSet>();
 
 		if(display){
 			// Define custom coloring for graph
@@ -150,7 +166,6 @@ public class CouplingMapper{
 		// Add all classes as nodes
 		for(String clazz: classList){
 			graph.addNode(clazz);
-			coverage.put(clazz, new HashSet<String>());
 			if(display){
 				graph.getNode(clazz).addAttribute("ui.label", clazz);
 				if(targets.contains(clazz)){
@@ -192,9 +207,6 @@ public class CouplingMapper{
 						}else{
 							graph.getEdge(eName).setAttribute("weight", graph.getEdge(eName).getNumber("weight") + 1);
 						}
-						HashSet newCov = coverage.get(source);
-						newCov.add(sink);
-						coverage.put(source, newCov);
 					}
 				}
 			}
@@ -215,21 +227,169 @@ public class CouplingMapper{
 			graph.display();	
 			//graph.addAttribute("ui.screenshot", project + ".png");	
 		}
+	}
 
-		// Shortest Path and Coverage
+	// Optimizes a set of classes for test generation
+	public void optimizeGenSet(ArrayList<String> targets, String mode, int population, int budget) throws Exception{
+		// Pre-compute and cache all shortest path distances and coverage
+		// These are calculated per target class
+		HashMap<String, ArrayList<Double>> pathLengths = new HashMap<String, ArrayList<Double>>();
+		HashMap<String, ArrayList<ArrayList<Node>>> coverage = new HashMap<String, ArrayList<ArrayList<Node>>>();
+		ArrayList<Double> maxLength = new ArrayList<Double>();
+		for(String target: targets){
+			maxLength.add(0.0);
+		}
 		Dijkstra dijkstra = new Dijkstra(Dijkstra.Element.NODE, null, null);
 		dijkstra.init(graph);
 		for(String clazz: classList){
-			dijkstra.setSource(graph.getNode(clazz));
-			dijkstra.compute();
-			for (String target : targets){
-				Node node = graph.getNode(target);
-				System.out.printf("%s->%s:%10.2f%n", dijkstra.getSource(), node, dijkstra.getPathLength(node));
-				System.out.println(dijkstra.getPath(node));
+			if(!targets.contains(clazz)){
+				// Shortest path to each target
+				dijkstra.setSource(graph.getNode(clazz));
+				dijkstra.compute();
+				ArrayList<Double> lengths = new ArrayList<Double>();
+				ArrayList<ArrayList<Node>> pathClasses = new ArrayList<ArrayList<Node>>();
+				for (int currentTarget = 0; currentTarget < targets.size(); currentTarget++){
+					String target = targets.get(currentTarget);
+					Node node = graph.getNode(target);
+					double length = dijkstra.getPathLength(node);
+					lengths.add(length);
+					if(length != Double.POSITIVE_INFINITY && length > maxLength.get(currentTarget)){
+						maxLength.set(currentTarget, length);
+					}
+					ArrayList<Node> classes = new ArrayList(dijkstra.getPath(node).getNodePath());
+					pathClasses.add(classes);
+				}
+			
+				// Only add it to the cache if the node is on at least one path to a target
+				int covSize = 0;
+				for(int currentTarget = 0; currentTarget < targets.size(); currentTarget++){
+					covSize += pathClasses.get(currentTarget).size();
+				}
+
+				if(covSize > 0){
+					pathLengths.put(clazz, lengths);
+					coverage.put(clazz, pathClasses);
+					//System.out.println("------\n" + clazz);
+					//System.out.println(lengths.toString());
+					//System.out.println(pathClasses.toString());
+				}
+				dijkstra.clear();
 			}
-			System.out.println("Coverage: " + coverage.get(clazz).toString());
-			dijkstra.clear();
 		}
+
+		// Generate solutions
+		if(mode.equals("random")){
+			randomSearch(population, budget, targets, pathLengths, coverage, maxLength);
+		}else{
+			throw new Exception("Invalid search mode: " + mode);
+		}
+	}
+
+	// Simple random search. Generates populations of solutions, tracks the best,
+	// and continues until the budget is exhausted 
+	public void randomSearch(int population, int budget, ArrayList<String> targets, 
+			HashMap<String, ArrayList<Double>> pathLengths, HashMap<String, ArrayList<ArrayList<Node>>> coverage,
+			ArrayList<Double> maxLength){
+
+		// Track the best solution seen		
+		ArrayList<String> bestSolution = new ArrayList<String>();
+		double bestScore = 100000;
+
+		boolean timeRemaining = true;
+		long startingTime = System.currentTimeMillis();
+		long elapsedTime = (System.currentTimeMillis() - startingTime) / 1000;
+
+		int generations = 0;
+
+		while(elapsedTime <= budget){
+			// If time remains in the budget, generate a population of solutions
+			ArrayList<ArrayList<String>> solutions = new ArrayList<ArrayList<String>>();
+			ArrayList<Double> scores = new ArrayList<Double>();
+			generations++;
+
+			for(int member = 0; member < population; member++){
+				HashSet<String> solutionSet = new HashSet<String>();
+
+				for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, 10); choice++){
+					ArrayList<String> classes = new ArrayList<String>(pathLengths.keySet());
+					solutionSet.add(classes.get(ThreadLocalRandom.current().nextInt(0, classes.size())));
+				}
+				solutions.add(new ArrayList<String>(solutionSet));
+				// Score solution
+				scores.add(scoreSolution(solutions.get(member), targets, pathLengths, coverage, maxLength));
+				// If the score is better, mark this as the "best" to date
+				if(scores.get(member) < bestScore){
+					bestScore = scores.get(member);
+					bestSolution = solutions.get(member);
+				}
+			}
+
+			// How much time has elapsed?
+			elapsedTime = (System.currentTimeMillis() - startingTime) / 1000;
+			System.out.println(generations + " : " + elapsedTime);
+		}
+
+		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());
+	}
+
+	/* Calculate a score for a set of classes
+	 * Score is the Euclidean distance to a sweet spot of min distance and max coverage
+	 * Distance = average distance from target for each node
+	 * Max distance is calculated from longest "shortest" path
+	 * Min distance = 2.0 (source, target)
+	 * Coverage = number of unique classes covered by the set, per target
+	 * Max coverage is all classes on a path to one of the targets
+	 * Min coverage = 2.0 (source, target)
+	 * score = root(norm(distance)^2 + (norm(coverage) - 1)^2)
+	 * Calculated for each target, then summed.
+	 */
+	public double scoreSolution(ArrayList<String> solution, ArrayList<String> targets, 
+			HashMap<String, ArrayList<Double>> pathLengths, HashMap<String, ArrayList<ArrayList<Node>>> coverage,
+			ArrayList<Double> maxLength){
+		ArrayList<Double> scores = new ArrayList<Double>();
+		for(int currentTarget = 0; currentTarget < targets.size(); currentTarget++){
+			double avgDistance = 0.0;
+			HashSet<String> coveredClasses = new HashSet<String>();
+			int omitted = 0;
+			for(int currentNode = 0; currentNode < solution.size(); currentNode++){
+				String node = solution.get(currentNode);
+				double toAdd = pathLengths.get(node).get(currentTarget);
+				if(toAdd != Double.POSITIVE_INFINITY){
+					avgDistance += toAdd;
+				}else{
+					omitted++;
+				}
+
+				for(Node cov : coverage.get(node).get(currentTarget)){
+					coveredClasses.add(cov.getId());
+				}	
+			}
+			if(solution.size() - omitted == 0){
+				avgDistance = maxLength.get(currentTarget);
+				// No path to target in chosen set.
+			}else{
+				avgDistance = avgDistance / (solution.size() - omitted);
+			}
+
+			// Normalize the distance
+			avgDistance = (avgDistance - 2.0) / (maxLength.get(currentTarget) - 2.0);
+			
+			// Calculate coverage
+			double coverageScore = coveredClasses.size();
+			coverageScore = (coverageScore - 2.0) / (pathLengths.keySet().size() - 2.0);
+			coverageScore = coverageScore - 1; // Convert to minimization
+
+			// Combine
+			double score = Math.sqrt(Math.pow(avgDistance, 2) + Math.pow(coverageScore, 2));
+
+			scores.add(score);
+		}
+
+		double finalScore = 0.0;
+		for(double score: scores){
+			finalScore += score;
+		}
+		return finalScore;
 	}
 
 	// Generates a list of Java files from a directory
@@ -663,5 +823,13 @@ public class CouplingMapper{
 
 	public void setProject(String project){
 		this.project = project;
+	}
+
+	public Graph getGraph(){
+		return graph;
+	}
+	
+	public void setGraph(Graph graph){
+		this.graph = graph;
 	}
 }
