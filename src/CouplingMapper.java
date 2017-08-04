@@ -96,7 +96,12 @@ public class CouplingMapper{
 					BufferedReader reader = new BufferedReader(new FileReader(words[1]));	
 					String current = "";
 					while((current = reader.readLine()) != null){
-						targets.add(current);
+						// Strip out path information
+						if(current.indexOf('.') >= 0){
+							targets.add(current.substring(current.lastIndexOf('.') + 1, current.length()));
+						}else{
+							targets.add(current);
+						}
 					}
 				}else if(words[0].equals("-d")){
 					if(words[1].equals("true")){
@@ -131,10 +136,13 @@ public class CouplingMapper{
 				// Generate CSV of results 
 				mapper.generateCSV();
 				// Generate graph
-				mapper.generateGraph(targets, display);
+				mapper.generateGraph(targets);
 				// Generate set of classes to generate tests for.
 				if(!mode.equals("none")){
-					mapper.optimizeGenSet(targets, mode, population, budget, retention, mutation, crossover);
+					mapper.optimizeGenSet(path, targets, mode, population, budget, retention, mutation, crossover);
+				}
+				if(display){
+					mapper.displayGraph();
 				}
 			}
 		}catch(Exception e){
@@ -157,32 +165,35 @@ public class CouplingMapper{
 		writer.close();
 	}
 
+	// Display the graph
+	public void displayGraph(){
+		graph.display();	
+		//graph.addAttribute("ui.screenshot", project + ".png");	
+	}
+
 	// Generate graph
-	public void generateGraph(ArrayList<String> targets, boolean display){
+	public void generateGraph(ArrayList<String> targets){
 		System.setProperty("org.graphstream.ui.renderer", "org.graphstream.ui.j2dviewer.J2DGraphRenderer");
 
-		if(display){
-			// Define custom coloring for graph
-			graph.addAttribute("ui.stylesheet", "graph { fill-color: white; }" +
-				"node { fill-color: black; text-background-mode: rounded-box; text-alignment: under; text-offset: 0, 5;}" +
-				"node.target { fill-color: red; }" +
-				"edge { shape: line; fill-color: #222; arrow-size: 5px, 4px;}" +
-				"edge.high { fill-color: red; }" +
-				"edge.medium { fill-color: orange; }" +
-				"edge.low { fill-color: blue; }"
-			);
-			graph.addAttribute("ui.quality");
-			graph.addAttribute("ui.antialias");
-		}
+		// Define custom coloring for graph
+		graph.addAttribute("ui.stylesheet", "graph { fill-color: white; }" +
+			"node { fill-color: black; text-background-mode: rounded-box; text-alignment: under; text-offset: 0, 5;}" +
+			"node.target { fill-color: red; }" +
+			"node.selected { fill-color: green; }" +
+			"edge { shape: line; fill-color: #222; arrow-size: 5px, 4px;}" +
+			"edge.high { fill-color: red; }" +
+			"edge.medium { fill-color: orange; }" +
+			"edge.low { fill-color: blue; }"
+		);
+		graph.addAttribute("ui.quality");
+		graph.addAttribute("ui.antialias");
 
 		// Add all classes as nodes
 		for(String clazz: classList){
 			graph.addNode(clazz);
-			if(display){
-				graph.getNode(clazz).addAttribute("ui.label", clazz);
-				if(targets.contains(clazz)){
-					graph.getNode(clazz).addAttribute("ui.class", "target");
-				}
+			graph.getNode(clazz).addAttribute("ui.label", clazz);
+			if(targets.contains(clazz)){
+				graph.getNode(clazz).addAttribute("ui.class", "target");
 			}
 		}
 
@@ -223,26 +234,22 @@ public class CouplingMapper{
 				}
 			}
 		}
-		if(display){
-			// Color edges by degree of coupling
-			for(Edge edge: graph.getEachEdge()){
-				double weight = edge.getNumber("weight");
-				if(weight <= 5){
-					edge.addAttribute("ui.class", "low");
-				}else if(weight <= 10){
-					edge.addAttribute("ui.class", "medium");
-				}else{
-					edge.addAttribute("ui.class", "high");
-				}
+		/*
+		// Color edges by degree of coupling
+		for(Edge edge: graph.getEachEdge()){
+			double weight = edge.getNumber("weight");
+			if(weight <= 5){
+				edge.addAttribute("ui.class", "low");
+			}else if(weight <= 10){
+				edge.addAttribute("ui.class", "medium");
+			}else{
+				edge.addAttribute("ui.class", "high");
 			}
-	
-			graph.display();	
-			//graph.addAttribute("ui.screenshot", project + ".png");	
-		}
+		}*/
 	}
 
 	// Optimizes a set of classes for test generation
-	public void optimizeGenSet(ArrayList<String> targets, String mode, int population, int budget, double retention, double mutation, double crossover) throws Exception{
+	public void optimizeGenSet(String path, ArrayList<String> targets, String mode, int population, int budget, double retention, double mutation, double crossover) throws Exception{
 		// Pre-compute and cache all shortest path distances and coverage
 		// These are calculated per target class
 		HashMap<String, ArrayList<Double>> pathLengths = new HashMap<String, ArrayList<Double>>();
@@ -296,20 +303,57 @@ public class CouplingMapper{
 				dijkstra.clear();
 			}
 		}
-
 		// Generate solutions
+		ArrayList<String> solution = new ArrayList<String>();
 		if(mode.equals("random")){
-			randomSearch(population, budget, targets, pathLengths, coverage, maxLength, maxCoverage);
+			solution = randomSearch(population, budget, targets, pathLengths, coverage, maxLength, maxCoverage);
 		}else if(mode.equals("ga")){
-			geneticSearch(population, budget, targets, pathLengths, coverage, maxLength, maxCoverage, retention, mutation, crossover);
+			solution = geneticSearch(population, budget, targets, pathLengths, coverage, maxLength, maxCoverage, retention, mutation, crossover);
 		}else{
 			throw new Exception("Invalid search mode: " + mode);
 		}
+
+		for(String clazz: classList){
+			if(solution.contains(clazz)){
+				graph.getNode(clazz).addAttribute("ui.class", "selected");
+			}
+		}
+
+		// Output list to a file
+		BufferedWriter writer = new BufferedWriter(new FileWriter(project + ".src"));
+		// Need to get the path name
+		for(String clazz: solution){
+			for(String fileName: couplings.keySet()){
+				if(path.indexOf('/') == 0){
+					if(fileName.indexOf('/') != 0){
+						fileName = "/" + fileName;
+					}
+				}
+				fileName = fileName.replace(path,"");
+				fileName = fileName.replace(".java","");
+				fileName = fileName.replace("/",".");
+				if(clazz.contains("$")){
+					String superClazz = clazz.substring(0, clazz.indexOf("$"));
+					String subClazz = clazz.substring(clazz.indexOf("$"), clazz.length());
+					if(superClazz.equals(fileName.substring(fileName.lastIndexOf(".") + 1, fileName.length()))){
+						clazz = fileName + subClazz;
+						break;
+					}
+				}else{
+					if(clazz.equals(fileName.substring(fileName.lastIndexOf(".") + 1, fileName.length()))){
+						clazz = fileName;
+						break;
+					}
+				}	
+			}
+			writer.write(clazz + "\n");
+		}
+		writer.close();
 	}
 
 	// Simple random search. Generates populations of solutions, tracks the best,
 	// and continues until the budget is exhausted 
-	public void randomSearch(int population, int budget, ArrayList<String> targets, 
+	public ArrayList<String> randomSearch(int population, int budget, ArrayList<String> targets, 
 			HashMap<String, ArrayList<Double>> pathLengths, HashMap<String, ArrayList<ArrayList<Node>>> coverage,
 			ArrayList<Double> maxLength, ArrayList<HashSet<String>> maxCoverage){
 
@@ -328,12 +372,12 @@ public class CouplingMapper{
 			ArrayList<ArrayList<String>> solutions = new ArrayList<ArrayList<String>>();
 			ArrayList<Double> scores = new ArrayList<Double>();
 			generations++;
+			ArrayList<String> classes = new ArrayList<String>(pathLengths.keySet());
 
 			for(int member = 0; member < population; member++){
 				HashSet<String> solutionSet = new HashSet<String>();
 
-				for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, 10); choice++){
-					ArrayList<String> classes = new ArrayList<String>(pathLengths.keySet());
+				for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, classes.size()); choice++){
 					solutionSet.add(classes.get(ThreadLocalRandom.current().nextInt(0, classes.size())));
 				}
 				solutions.add(new ArrayList<String>(solutionSet));
@@ -351,13 +395,14 @@ public class CouplingMapper{
 			System.out.println(generations + " : " + elapsedTime);
 		}
 
-		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());
+		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());	
+		return bestSolution;
 	}
 
 	// Simple genetic algorithm. Generates populations of solutions, tracks the best,
 	// formulates new population using retention, mutation, crossover, and replacement.
 	// Continues until the budget is exhausted 
-	public void geneticSearch(int population, int budget, ArrayList<String> targets, 
+	public ArrayList<String> geneticSearch(int population, int budget, ArrayList<String> targets, 
 			HashMap<String, ArrayList<Double>> pathLengths, HashMap<String, ArrayList<ArrayList<Node>>> coverage,
 			ArrayList<Double> maxLength, ArrayList<HashSet<String>> maxCoverage, double retention, double mutation, double crossover){
 
@@ -374,7 +419,7 @@ public class CouplingMapper{
 		for(int member = 0; member < population; member++){
 			HashSet<String> solutionSet = new HashSet<String>();
 
-			for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, 10); choice++){
+			for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, classes.size()); choice++){
 				solutionSet.add(classes.get(ThreadLocalRandom.current().nextInt(0, classes.size())));
 			}
 			solutions.add(new ArrayList<String>(solutionSet));
@@ -409,33 +454,39 @@ public class CouplingMapper{
 						topPosition = score;
 					}
 				}
-				newSolutions.add(solutions.get(topPosition));
-				newScores.add(topScore);
-				solutions.remove(topPosition);
-				scores.remove(topScore);
+				if(topPosition >= 0){
+					newSolutions.add(solutions.get(topPosition));
+					newScores.add(topScore);
+					solutions.remove(topPosition);
+					scores.remove(topScore);
+				}
 			}
 
 			// Mutate some of these members
 			ArrayList<ArrayList<String>> mutatedSols = new ArrayList<ArrayList<String>>();
 			for(int choice = 0; choice < ((int) (mutation * population)); choice++){
-				ArrayList<String> chosen = newSolutions.get(ThreadLocalRandom.current().nextInt(0, newSolutions.size()));
-				ArrayList<String> mutated = mutateSolution(chosen, classes);
-				mutatedSols.add(mutated);
+				if(newSolutions.size() > 0){
+					ArrayList<String> chosen = newSolutions.get(ThreadLocalRandom.current().nextInt(0, newSolutions.size()));
+					ArrayList<String> mutated = mutateSolution(chosen, classes);
+					mutatedSols.add(mutated);
+				}
 			}
 			
 			// Perform crossover to create new members
 			for(int choice = 0; choice < ((int) (crossover * population)); choice += 2){
-				int first = 0;
-				int second = 0;
-				while(first == second){
-					// Which solutions should be the parents?
-					first = ThreadLocalRandom.current().nextInt(0, newSolutions.size());
-					second = ThreadLocalRandom.current().nextInt(0, newSolutions.size());
-				}
+				if(newSolutions.size() > 0){
+					int first = 0;
+					int second = 0;
+					while(first == second){
+						// Which solutions should be the parents?
+						first = ThreadLocalRandom.current().nextInt(0, newSolutions.size());
+						second = ThreadLocalRandom.current().nextInt(0, newSolutions.size());
+					}
 
-				ArrayList<ArrayList<String>> children = crossoverSolutions(newSolutions.get(first), newSolutions.get(second));
-				mutatedSols.add(children.get(0));
-				mutatedSols.add(children.get(1));
+					ArrayList<ArrayList<String>> children = crossoverSolutions(newSolutions.get(first), newSolutions.get(second));
+					mutatedSols.add(children.get(0));
+					mutatedSols.add(children.get(1));
+				}
 			}
 
 			// Add mutated and crossover solutions to set
@@ -445,10 +496,14 @@ public class CouplingMapper{
 			}
 	
 			// Fill the rest randomly
-			for(int member = newSolutions.size() - 1; member < population; member++){
+			int start = newSolutions.size() - 1;
+			if(start < 0){
+				start = 0;
+			}
+			for(int member = start; member < population; member++){
 				HashSet<String> solutionSet = new HashSet<String>();
 
-				for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, 10); choice++){
+				for(int choice = 0; choice < ThreadLocalRandom.current().nextInt(1, classes.size()); choice++){
 					solutionSet.add(classes.get(ThreadLocalRandom.current().nextInt(0, classes.size())));
 				}
 				newSolutions.add(new ArrayList<String>(solutionSet));
@@ -471,7 +526,7 @@ public class CouplingMapper{
 		}
 
 		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());
-		//scoreSolution(bestSolution, targets, pathLengths, coverage, maxLength, maxCoverage);
+		return bestSolution;
 	}
 
 	// Mutate a solution by adding, deleting, or changing one of the classes
@@ -603,8 +658,12 @@ public class CouplingMapper{
 			}
 
 			// Normalize the distance
-			avgDistance = (avgDistance - 2.0) / (maxLength.get(currentTarget) - 2.0);
-			
+			if(maxLength.get(currentTarget) > 2.0){
+				avgDistance = (avgDistance - 2.0) / (maxLength.get(currentTarget) - 2.0);
+			}else{
+				avgDistance = 0.0;
+			}	
+
 			// Calculate the set size
 			double size = (solution.size() - 1.0) / (pathLengths.keySet().size() - 1.0);
 
