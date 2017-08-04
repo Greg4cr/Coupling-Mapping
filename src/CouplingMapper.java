@@ -320,6 +320,11 @@ public class CouplingMapper{
 		}
 
 		// Output list to a file
+		for(String target: targets){
+			solution.add(target);
+		}
+		System.out.println("Size: " + solution.size() + " / " + classList.size());
+
 		BufferedWriter writer = new BufferedWriter(new FileWriter(project + ".src"));
 		// Need to get the path name
 		for(String clazz: solution){
@@ -392,7 +397,7 @@ public class CouplingMapper{
 
 			// How much time has elapsed?
 			elapsedTime = (System.currentTimeMillis() - startingTime) / 1000;
-			System.out.println(generations + " : " + elapsedTime);
+			//System.out.println(generations + " : " + elapsedTime);
 		}
 
 		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());	
@@ -522,7 +527,7 @@ public class CouplingMapper{
 
 			// How much time has elapsed?
 			elapsedTime = (System.currentTimeMillis() - startingTime) / 1000;
-			System.out.println(generations + " : " + elapsedTime);
+			//System.out.println(generations + " : " + elapsedTime);
 		}
 
 		System.out.println("-----\n" + bestScore + " : " + bestSolution.toString());

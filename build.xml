@@ -7,6 +7,10 @@
         </fileset>
     </path>
 
+    <pathconvert property="classpath" pathsep=" ">
+        <path refid="compile.classpath"/>
+    </pathconvert>
+
     <target name="antlr">
         <java jar="lib/antlr-4.5.3-complete.jar" fork="true">
             <arg value="-visitor"/>
@@ -39,5 +43,16 @@
             </fileset>
         </delete> 
     </target>
+
+    <target name="build-jar" depends="compile">
+        <jar destfile="target/CouplingMapper.jar"
+            basedir="bin/">
+            <zipgroupfileset dir="lib/" includes="*.jar"/>
+            <manifest>
+                <attribute name="Main-Class" value="CouplingMapper"/>
+                <attribute name="Class-Path" value="${classpath}"/>
+            </manifest>
+        </jar>
+    </target> 
 
 </project>
