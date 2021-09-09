@@ -799,74 +799,38 @@ public class CouplingVisitor extends JavaBaseListener {
 		// Child 2 should be a "." to count
 		if(ctx.getChildCount() > 2){
 			if(ctx.getChild(1).getText().equals(".")){
-				//System.out.println("-------" + location.peek() + "\n--" + ctx.getText());
-				ArrayList<String> deps;
-				if(couplings.containsKey(location.peek())){
-					deps = couplings.get(location.peek());
-				}else{	
-					deps = new ArrayList<String>();
-				}
-				String expr = ctx.getText();
-				// Remove generics
-				expr = expr.replaceAll("<.*?>","");
-				// Remove array references
-				expr = expr.replaceAll("\\[.*?\\]","");
-				// Replace strings with generic filler.
-				expr = expr.replaceAll("\\\".*?\\\"","String");
-				expr = expr.replaceAll("\\\'.*?\\\'","char");
+ 		                if(location.isEmpty()){
+                                    System.out.println("--------" + ctx.getText());
+	                        } else{
+					//System.out.println("-------" + location.peek() + "\n--" + ctx.getText());
+					ArrayList<String> deps;
+					if(couplings.containsKey(location.peek())){
+						deps = couplings.get(location.peek());
+					}else{	
+						deps = new ArrayList<String>();
+					}
+					String expr = ctx.getText();
+					// Remove generics
+					expr = expr.replaceAll("<.*?>","");
+					// Remove array references
+					expr = expr.replaceAll("\\[.*?\\]","");
+					// Replace strings with generic filler.
+					expr = expr.replaceAll("\\\".*?\\\"","String");
+					expr = expr.replaceAll("\\\'.*?\\\'","char");
 			
-				if(expr.contains("(")){
-					/* We want to remove arguments
-					 * Parentheses are part of arguments, casts, and subexpressions
-					 * Given our restrictions on the types of expressions considered 
- 					 * at this stage, parentheses can only come through in certain forms.
-					 */
+					if(expr.contains("(")){
+						/* We want to remove arguments
+						 * Parentheses are part of arguments, casts, and subexpressions
+						 * Given our restrictions on the types of expressions considered 
+ 						 * at this stage, parentheses can only come through in certain forms.
+						 */
 						
-					if(expr.indexOf("(")==0){
-						String[] parts = expr.split("[.]"); 
-						String first = "";
-						String rest = "";
-						boolean balanced = false;
-						int parens = 0;
-						for(int part = 0; part < parts.length; part++){
-							if(balanced){
-								if(part < parts.length - 1){
-									rest = rest + parts[part] + ".";
-								}else{
-									rest = rest + parts[part];
-								}
-							}else{
-								for(char letter: parts[part].toCharArray()){
-									if(letter == '('){
-										parens++;
-									}else if(letter == ')'){
-										parens--;
-									}
-								}
-
-								if(parens == 0){
-									balanced = true;
-								}
-								first = first + parts[part] + ".";						
-							}
-						}
-						first = first.substring(0, first.length() - 1);
-
-						// Now drop parens if this is a grouping
-						if(first.charAt(first.length()-1) == ')'){
-							first = first.substring(1, first.length() - 1);
-						}
-						expr = first + "." + rest;
-						//System.out.println(expr);
-
-						while(expr.charAt(1) == '('){
-							// Split into substrings based on "."
-							parts = expr.split("[.]");
-							first = "";
-							rest = "";
-							balanced = false;
-							parens = 0;
-
+						if(expr.indexOf("(")==0){
+							String[] parts = expr.split("[.]"); 
+							String first = "";
+							String rest = "";
+							boolean balanced = false;
+							int parens = 0;
 							for(int part = 0; part < parts.length; part++){
 								if(balanced){
 									if(part < parts.length - 1){
@@ -897,182 +861,222 @@ public class CouplingVisitor extends JavaBaseListener {
 							}
 							expr = first + "." + rest;
 							//System.out.println(expr);
-						}
-	
-						// Now, if this is a cast, replace with type
-						if(first.charAt(0) == '('){
-							String castType = "";
-							parts = first.split("[(]");
-							for(int word = 0; word < parts.length; word++){
-								if(!parts[word].equals("")){
-									castType = parts[word].substring(0,parts[word].indexOf(")"));
-									break;
+
+							while(expr.charAt(1) == '('){
+								// Split into substrings based on "."
+								parts = expr.split("[.]");
+								first = "";
+								rest = "";
+								balanced = false;
+								parens = 0;
+
+								for(int part = 0; part < parts.length; part++){
+									if(balanced){
+										if(part < parts.length - 1){
+											rest = rest + parts[part] + ".";
+										}else{
+											rest = rest + parts[part];
+										}
+									}else{
+										for(char letter: parts[part].toCharArray()){
+											if(letter == '('){
+												parens++;
+											}else if(letter == ')'){
+												parens--;
+											}
+										}
+
+										if(parens == 0){
+											balanced = true;
+										}
+										first = first + parts[part] + ".";						
+									}
 								}
-							}
-							first = castType;
-						}
-						expr = first + "." + rest;
-					}
-					
-					int include = 0;
-					String newExpr = "";
-					for(char letter : expr.toCharArray()){
-						if(letter == '('){
-							include++;
-						}else if(letter == ')'){
-							include--;
-						}else if(include == 0){
-							newExpr = newExpr + letter;
-						}
-					}	
-					expr = newExpr;
-				}	
+								first = first.substring(0, first.length() - 1);
 
-				// Find type of referenced variable
-				String var;
-				if(expr.contains(".")){
-					var = expr.substring(0,expr.indexOf("."));
-				}else{
-					var = expr;
-				}
-				boolean found = false;
-				HashMap<String, String> vars;
-				
-				// If the "variable" is super, fill in parent class
-				if(var.equals("super")){
-					String pName = "";
-					if(location.peek().contains(".")){
-						pName = location.peek().substring(0, location.peek().indexOf("."));
-					}else{
-						pName = location.peek();
-					}
-					if(parents.containsKey(pName)){
-						var = parents.get(pName);
-						found = true;
-					}else{
-						// If no parent, all classes descend from Object
-						var = "Object";
-						found = true;
-					}
-				}
-
-				// Check for keyword "this"
-				if(!found){ 
-					if(var.equals("this")){
-						if(location.peek().contains(".")){
-							var = location.peek().substring(0,location.peek().indexOf("."));
-						}else{
-							var = location.peek();
-						}
-						found = true;
-					}
-				}
-				
-				// Check for Java globally available methods
-				if(!found){
-					if(var.equals("getType") || var.equals("getClass")){
-						var = "Class";
-						found = true;
-					}
-				}
-				//Check globals
-				if(!found){
-					if(variables.containsKey(location.peek())){
-						vars = variables.get(location.peek());
-						for(String current : vars.keySet()){
-							if(current.equals(var)){
-								found = true;
-								var = vars.get(current);
-								break;
+								// Now drop parens if this is a grouping
+								if(first.charAt(first.length()-1) == ')'){
+									first = first.substring(1, first.length() - 1);
+								}
+								expr = first + "." + rest;
+								//System.out.println(expr);
 							}
-						}
-					}
-				}
-				// Then check locals
-				if(!found){
-					if(variables.containsKey(location.peek())){
-						vars = variables.get(location.peek());
-						for(String current : vars.keySet()){
-							if(current.equals(var)){
-								var = vars.get(current);
-								found = true;
-								break;
-							}
-						}
-					}
-				}
-				// It could also be a static method
-				if(!found){
-					Stack<String> nesting = (Stack<String>) location.clone();
-					String currentClass = "";
-					while(!nesting.isEmpty()){
-						currentClass = nesting.pop();
-						if(!nesting.contains(".")){
-							break;
-						}
-					}
-					if(returnTypes.containsKey(currentClass + "." + var)){
-						var = returnTypes.get(currentClass + "." + var);
-						found = true; 
-					}
-				}
-
-				// It can also be a global variable or method from the outer class
-				
-				if(!found){
-					Stack<String> nesting = (Stack<String>) location.clone();
-					while(!nesting.isEmpty()){
-						String level = nesting.pop();
-						if(!level.contains(".")){
-							if(variables.containsKey(level)){
-								vars = variables.get(level);
-								for(String current : vars.keySet()){
-									if(current.equals(var)){
-										found = true;
-										var = vars.get(current);
+	
+							// Now, if this is a cast, replace with type
+							if(first.charAt(0) == '('){
+								String castType = "";
+								parts = first.split("[(]");
+								for(int word = 0; word < parts.length; word++){
+									if(!parts[word].equals("")){
+										castType = parts[word].substring(0,parts[word].indexOf(")"));
 										break;
 									}
 								}
-							}		
-							if(!found){
-								if(returnTypes.containsKey(level + "." + var)){
-									var = returnTypes.get(level + "." + var);
-									found = true; 
+								first = castType;
+							}
+							expr = first + "." + rest;
+						}
+					
+						int include = 0;
+						String newExpr = "";
+						for(char letter : expr.toCharArray()){
+							if(letter == '('){
+								include++;
+							}else if(letter == ')'){
+								include--;
+							}else if(include == 0){
+								newExpr = newExpr + letter;
+							}
+						}	
+						expr = newExpr;
+					}	
+
+					// Find type of referenced variable
+					String var;
+					if(expr.contains(".")){
+						var = expr.substring(0,expr.indexOf("."));
+					}else{
+						var = expr;
+					}
+					boolean found = false;
+					HashMap<String, String> vars;
+				
+					// If the "variable" is super, fill in parent class
+					if(var.equals("super")){
+						String pName = "";
+						if(location.peek().contains(".")){
+							pName = location.peek().substring(0, location.peek().indexOf("."));
+						}else{
+							pName = location.peek();
+						}
+						if(parents.containsKey(pName)){
+							var = parents.get(pName);
+							found = true;
+						}else{
+							// If no parent, all classes descend from Object
+							var = "Object";
+							found = true;
+						}
+					}
+
+					// Check for keyword "this"
+					if(!found){ 
+						if(var.equals("this")){
+							if(location.peek().contains(".")){
+								var = location.peek().substring(0,location.peek().indexOf("."));
+							}else{
+								var = location.peek();
+							}
+							found = true;
+						}
+					}
+				
+					// Check for Java globally available methods
+					if(!found){
+						if(var.equals("getType") || var.equals("getClass")){
+							var = "Class";
+							found = true;
+						}
+					}
+					//Check globals
+					if(!found){
+						if(variables.containsKey(location.peek())){
+							vars = variables.get(location.peek());
+							for(String current : vars.keySet()){
+								if(current.equals(var)){
+									found = true;
+									var = vars.get(current);
+									break;
 								}
 							}
 						}
-						if(found){
-							break;
+					}
+					// Then check locals
+					if(!found){
+						if(variables.containsKey(location.peek())){
+							vars = variables.get(location.peek());
+							for(String current : vars.keySet()){
+								if(current.equals(var)){
+									var = vars.get(current);
+									found = true;
+									break;
+								}
+							}
 						}
 					}
-				} 
+					// It could also be a static method
+					if(!found){
+						Stack<String> nesting = (Stack<String>) location.clone();
+						String currentClass = "";
+						while(!nesting.isEmpty()){
+							currentClass = nesting.pop();
+							if(!nesting.contains(".")){
+								break;
+							}
+						}
+						if(returnTypes.containsKey(currentClass + "." + var)){
+							var = returnTypes.get(currentClass + "." + var);
+							found = true; 
+						}
+					}
+
+					// It can also be a global variable or method from the outer class
+				
+					if(!found){
+						Stack<String> nesting = (Stack<String>) location.clone();
+						while(!nesting.isEmpty()){
+							String level = nesting.pop();
+							if(!level.contains(".")){
+								if(variables.containsKey(level)){
+									vars = variables.get(level);
+									for(String current : vars.keySet()){
+										if(current.equals(var)){
+											found = true;
+											var = vars.get(current);
+											break;
+										}
+									}
+								}		
+								if(!found){
+									if(returnTypes.containsKey(level + "." + var)){
+										var = returnTypes.get(level + "." + var);
+										found = true; 
+									}
+								}
+							}
+							if(found){
+								break;
+							}
+						}
+					} 
 							
-				// It could actually a "new" declaration
-				if(!found && var.contains("new")){
-					if(var.indexOf("new") == 0){
-						var = var.substring(3,var.length());
+					// It could actually a "new" declaration
+					if(!found && var.contains("new")){
+						if(var.indexOf("new") == 0){
+							var = var.substring(3,var.length());
+							found = true;
+						}
+					}
+				
+					// If this is a subexpression, it is a primitive
+					if(var.contains("+") || var.contains("-") || var.contains("*") || var.contains("/") || var.contains("&") || var.contains("&") || var.contains("|")){
+						var = "primitive";
+
 						found = true;
 					}
-				}
 				
-				// If this is a subexpression, it is a primitive
-				if(var.contains("+") || var.contains("-") || var.contains("*") || var.contains("/") || var.contains("&") || var.contains("&") || var.contains("|")){
-					var = "primitive";
-
-					found = true;
-				}
-				
-				// Now put the type in
-				if(found){
-					if(expr.contains(".")){
-						expr = var + expr.substring(expr.indexOf("."),expr.length());
-					}else{
-						expr = var;
+					// Now put the type in
+					if(found){
+						if(expr.contains(".")){
+							expr = var + expr.substring(expr.indexOf("."),expr.length());
+						}else{
+							expr = var;
+						}
 					}
+					//System.out.println(expr);
+					deps.add(expr);
+					couplings.put(location.peek(), deps);
 				}
-				//System.out.println(expr);
-				deps.add(expr);
-				couplings.put(location.peek(), deps);
 			}
 		}
 	}
